@@ -1,0 +1,216 @@
+// src/components/Canvas.js
+import React, { useRef, useEffect, forwardRef } from 'react';
+
+const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
+  const animationRef = useRef();
+  const gridPatternRef = useRef();
+  
+  useEffect(() => {
+    if (!ref.current) return;
+    
+    const canvas = ref.current;
+    const ctx = canvas.getContext('2d');
+    
+    // Ustaw rozmiar canvas
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    
+    // Stwórz wzór siatki
+    const createGridPattern = () => {
+      const patternCanvas = document.createElement('canvas');
+      const patternCtx = patternCanvas.getContext('2d');
+      const gridSize = 50;
+      
+      patternCanvas.width = gridSize;
+      patternCanvas.height = gridSize;
+      
+      patternCtx.strokeStyle = '#f0f0f0';
+      patternCtx.lineWidth = 1;
+      
+      // Rysuj linie siatki
+      patternCtx.beginPath();
+      patternCtx.moveTo(gridSize, 0);
+      patternCtx.lineTo(gridSize, gridSize);
+      patternCtx.moveTo(0, gridSize);
+      patternCtx.lineTo(gridSize, gridSize);
+      patternCtx.stroke();
+      
+      return ctx.createPattern(patternCanvas, 'repeat');
+    };
+    
+    gridPatternRef.current = createGridPattern();
+    
+    // Funkcja renderowania
+    const render = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      if (!playerView || !playerView.player) {
+        animationRef.current = requestAnimationFrame(render);
+        return;
+      }
+      
+      const { player, players, food, gameState } = playerView;
+      
+      // Oblicz przesunięcie kamery
+      const cameraX = player.x - canvas.width / 2;
+      const cameraY = player.y - canvas.height / 2;
+      
+      // Zapisz stan kontekstu
+      ctx.save();
+      
+      // Przesuń canvas względem gracza
+      ctx.translate(-cameraX, -cameraY);
+      
+      // Rysuj tło z siatką
+      if (gridPatternRef.current) {
+        ctx.fillStyle = gridPatternRef.current;
+        ctx.fillRect(
+          Math.floor(cameraX / 50) * 50,
+          Math.floor(cameraY / 50) * 50,
+          canvas.width + 100,
+          canvas.height + 100
+        );
+      }
+      
+      // Rysuj granice mapy
+      if (gameState?.mapSize) {
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 5;
+        ctx.strokeRect(0, 0, gameState.mapSize, gameState.mapSize);
+      }
+      
+      // Rysuj jedzenie
+      food.forEach(f => {
+        // Cień
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+        ctx.shadowBlur = 5;
+        ctx.shadowOffsetX = 2;
+        ctx.shadowOffsetY = 2;
+        
+        ctx.fillStyle = f.color;
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Reset cienia
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+      });
+      
+      // Rysuj graczy
+      players.forEach(p => {
+        // Cień gracza
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetX = 3;
+        ctx.shadowOffsetY = 3;
+        
+        // Ciało gracza
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Obramowanie
+        ctx.strokeStyle = p.isMe ? '#FFD700' : '#000000';
+        ctx.lineWidth = p.isMe ? 3 : 2;
+        ctx.stroke();
+        
+        // Reset cienia
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        
+        // Nazwa gracza
+        ctx.fillStyle = '#000000';
+        ctx.font = `${Math.max(12, p.radius / 4)}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(p.nickname || 'Player', p.x, p.y);
+        
+        // Masa gracza (mniejsza czcionka)
+        ctx.font = `${Math.max(10, p.radius / 6)}px Arial`;
+        ctx.fillStyle = '#666666';
+        ctx.fillText(Math.floor(p.radius * p.radius / 25), p.x, p.y + p.radius / 3);
+      });
+      
+      // Przywróć stan kontekstu
+      ctx.restore();
+      
+      // Rysuj miniaturkę mapy
+      drawMinimap(ctx, canvas, player, gameState);
+      
+      animationRef.current = requestAnimationFrame(render);
+    };
+    
+    // Funkcja rysowania minimapy
+    const drawMinimap = (ctx, canvas, player, gameState) => {
+      if (!gameState?.mapSize) return;
+      
+      const minimapSize = 200;
+      const minimapPadding = 20;
+      const minimapX = canvas.width - minimapSize - minimapPadding;
+      const minimapY = canvas.height - minimapSize - minimapPadding;
+      
+      // Tło minimapy
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(minimapX, minimapY, minimapSize, minimapSize);
+      
+      // Obramowanie
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(minimapX, minimapY, minimapSize, minimapSize);
+      
+      // Pozycja gracza na minimapie
+      const scale = minimapSize / gameState.mapSize;
+      const playerMinimapX = minimapX + player.x * scale;
+      const playerMinimapY = minimapY + player.y * scale;
+      
+      // Gracz na minimapie
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      ctx.arc(playerMinimapX, playerMinimapY, 3, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Obszar widoczny
+      const viewSize = 1000 * scale; // Przybliżony obszar widoczny
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(
+        playerMinimapX - viewSize / 2,
+        playerMinimapY - viewSize / 2,
+        viewSize,
+        viewSize
+      );
+    };
+    
+    // Rozpocznij renderowanie
+    render();
+    
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [playerView, ref]);
+  
+  return (
+    <canvas
+      ref={ref}
+      className="game-canvas"
+      onMouseMove={onMouseMove}
+      onContextMenu={(e) => e.preventDefault()}
+    />
+  );
+});
+
+Canvas.displayName = 'Canvas';
+
+export default Canvas;
