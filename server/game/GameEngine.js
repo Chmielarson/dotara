@@ -58,7 +58,9 @@ class GameEngine {
     const player = this.players.get(playerAddress);
     if (player) {
       // Zamień gracza na jedzenie
-      this.convertPlayerToFood(player);
+      if (player.isAlive) {
+        this.convertPlayerToFood(player);
+      }
       this.players.delete(playerAddress);
       this.eliminatedPlayers.add(playerAddress);
       
@@ -66,8 +68,16 @@ class GameEngine {
       
       // Sprawdź czy został tylko jeden gracz
       const activePlayers = Array.from(this.players.values()).filter(p => p.isAlive);
+      console.log(`Active players remaining: ${activePlayers.length}`);
+      
       if (activePlayers.length === 1 && this.isRunning) {
         this.winner = activePlayers[0].address;
+        console.log(`Game ${this.roomId} has a winner: ${this.winner}`);
+        // Zatrzymaj grę
+        this.stop();
+      } else if (activePlayers.length === 0 && this.isRunning) {
+        console.log(`Game ${this.roomId} ended with no survivors`);
+        this.winner = null;
         this.stop();
       }
     }
@@ -150,9 +160,9 @@ class GameEngine {
       ejectMass
     );
     
-    // Nadaj prędkość wyrzuconej masie
-    food.velocityX = Math.cos(angle) * 8;
-    food.velocityY = Math.sin(angle) * 8;
+    // Nadaj prędkość wyrzuconej masie (zwiększona 3x)
+    food.velocityX = Math.cos(angle) * 24;
+    food.velocityY = Math.sin(angle) * 24;
     
     this.food.set(food.id, food);
   }
@@ -229,6 +239,7 @@ class GameEngine {
   
   checkCollisions() {
     const players = Array.from(this.players.values()).filter(p => p.isAlive);
+    const playersToRemove = [];
     
     // Kolizje gracz-jedzenie
     for (const player of players) {
@@ -255,19 +266,29 @@ class GameEngine {
         const player1 = players[i];
         const player2 = players[j];
         
-        if (this.physics.checkCircleCollision(player1, player2)) {
+        // Sprawdź kolizję z 50% pokryciem
+        if (this.physics.checkCircleCollisionWithOverlap(player1, player2, 0.5)) {
           // Większy gracz zjada mniejszego
           if (player1.radius > player2.radius * 1.1) {
+            console.log(`Player ${player1.address} is eating player ${player2.address} (50% overlap)`);
             player1.eat(player2.mass);
             player2.die();
             this.eliminatedPlayers.add(player2.address);
+            playersToRemove.push(player2.address);
           } else if (player2.radius > player1.radius * 1.1) {
+            console.log(`Player ${player2.address} is eating player ${player1.address} (50% overlap)`);
             player2.eat(player1.mass);
             player1.die();
             this.eliminatedPlayers.add(player1.address);
+            playersToRemove.push(player1.address);
           }
         }
       }
+    }
+    
+    // Usuń graczy po zakończeniu sprawdzania kolizji
+    for (const playerAddress of playersToRemove) {
+      this.removePlayer(playerAddress);
     }
   }
   
@@ -284,15 +305,22 @@ class GameEngine {
         x: player.x,
         y: player.y
       }));
+    
+    // Dodaj liczbę aktywnych graczy
+    const activePlayers = Array.from(this.players.values()).filter(p => p.isAlive);
+    console.log(`Leaderboard update: ${activePlayers.length} active players`);
   }
   
   getGameState() {
+    const activePlayers = Array.from(this.players.values()).filter(p => p.isAlive);
+    
     return {
       roomId: this.roomId,
       mapSize: this.mapSize,
       isRunning: this.isRunning,
       winner: this.winner,
-      playerCount: this.players.size,
+      playerCount: activePlayers.length,
+      totalPlayers: this.players.size,
       foodCount: this.food.size,
       leaderboard: this.leaderboard,
       eliminatedPlayers: Array.from(this.eliminatedPlayers)
@@ -302,6 +330,24 @@ class GameEngine {
   getPlayerView(playerAddress) {
     const player = this.players.get(playerAddress);
     if (!player) return null;
+    
+    // Jeśli gracz nie żyje, zwróć tylko podstawowe informacje
+    if (!player.isAlive) {
+      return {
+        player: {
+          x: player.x,
+          y: player.y,
+          radius: player.radius,
+          mass: player.mass,
+          color: player.color,
+          isAlive: false
+        },
+        players: [],
+        food: [],
+        leaderboard: this.leaderboard,
+        gameState: this.getGameState()
+      };
+    }
     
     // Obszar widoczny dla gracza
     const viewRadius = 500 + player.radius * 2;

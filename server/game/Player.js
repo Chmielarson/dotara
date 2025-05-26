@@ -18,7 +18,7 @@ class Player {
     // Prędkość
     this.velocityX = 0;
     this.velocityY = 0;
-    this.baseSpeed = 5;
+    this.baseSpeed = 15; // Zwiększone z 5 na 15 (3x szybciej)
     
     // Ograniczenia
     this.lastSplitTime = 0;

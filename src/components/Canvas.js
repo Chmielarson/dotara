@@ -104,8 +104,25 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
         ctx.shadowOffsetY = 0;
       });
       
-      // Rysuj graczy
-      players.forEach(p => {
+      // Rysuj graczy - sortuj według rozmiaru (mniejsze najpierw, większe na wierzchu)
+      const sortedPlayers = [...players].sort((a, b) => a.radius - b.radius);
+      
+      sortedPlayers.forEach(p => {
+        // Sprawdź czy gracz jest w niebezpieczeństwie (dotyka większego gracza)
+        let inDanger = false;
+        if (p.isMe && player.isAlive) {
+          players.forEach(other => {
+            if (other.id !== p.id && other.radius > p.radius * 1.1) {
+              const dx = other.x - p.x;
+              const dy = other.y - p.y;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              if (distance < other.radius + p.radius) {
+                inDanger = true;
+              }
+            }
+          });
+        }
+        
         // Cień gracza
         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
         ctx.shadowBlur = 10;
@@ -119,8 +136,16 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
         ctx.fill();
         
         // Obramowanie
-        ctx.strokeStyle = p.isMe ? '#FFD700' : '#000000';
-        ctx.lineWidth = p.isMe ? 3 : 2;
+        if (inDanger) {
+          // Czerwone migające obramowanie gdy gracz jest w niebezpieczeństwie
+          ctx.strokeStyle = '#FF0000';
+          ctx.lineWidth = 5;
+          ctx.setLineDash([10, 5]);
+        } else {
+          ctx.strokeStyle = p.isMe ? '#FFD700' : '#000000';
+          ctx.lineWidth = p.isMe ? 3 : 2;
+          ctx.setLineDash([]);
+        }
         ctx.stroke();
         
         // Reset cienia

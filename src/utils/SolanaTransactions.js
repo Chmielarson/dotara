@@ -21,7 +21,7 @@ const GAME_SERVER_URL = 'http://localhost:3001';
 console.log('Using game server URL:', GAME_SERVER_URL);
 
 // Twój Program ID
-const PROGRAM_ID = new PublicKey('EhP1ossEJvx2hrRWhbsQDUVoUoFbWGjap3uxZsjMaknH');
+const PROGRAM_ID = new PublicKey('5vGU3fqNat5z6v7MHMT7Zb9v9Q788geefMXUsSCszQ6M');
 const SYSVAR_RENT_PUBKEY = new PublicKey('SysvarRent111111111111111111111111111111111');
 const PLATFORM_FEE_WALLET = new PublicKey('FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8');
 
@@ -343,7 +343,16 @@ export async function endGame(roomId, winnerAddress, wallet) {
   }
   const roomData = await response.json();
   
-  if (roomData.blockchainEnded) return { success: true, alreadyEnded: true };
+  // Sprawdź czy gra już została zakończona na blockchainie
+  if (roomData.blockchainEnded) {
+    console.log('Game already ended on blockchain');
+    return { success: true, alreadyEnded: true };
+  }
+  
+  // Sprawdź czy podany gracz faktycznie wygrał
+  if (roomData.winner !== winnerAddress) {
+    throw new Error('Winner mismatch');
+  }
   
   const roomPDA = new PublicKey(roomData.roomAddress);
   const winnerPubkey = new PublicKey(winnerAddress);

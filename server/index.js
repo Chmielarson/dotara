@@ -23,8 +23,12 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST']
-  }
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  // Dodaj opcje dla lepszej kompatybilności
+  transports: ['websocket', 'polling'],
+  allowEIO3: true
 });
 
 // Konfiguracja Solana
@@ -39,6 +43,7 @@ const games = new Map();
 const activeRooms = new Map();
 const playerSockets = new Map(); // playerAddress -> socketId
 const socketPlayers = new Map(); // socketId -> { playerAddress, roomId }
+const endedGames = new Set(); // Set do śledzenia zakończonych gier
 
 // API Routes
 app.get('/api/rooms', (req, res) => {
@@ -281,6 +286,12 @@ app.post('/api/rooms/:id/end', async (req, res) => {
       return res.status(404).json({ error: 'Room not found' });
     }
     
+    // Sprawdź czy gra już została zakończona
+    if (room.blockchainEnded) {
+      console.log(`Game ${roomId} already ended on blockchain`);
+      return res.json({ success: true, alreadyEnded: true });
+    }
+    
     room.winner = winnerAddress;
     room.isActive = false;
     room.blockchainEnded = true;
@@ -295,13 +306,54 @@ app.post('/api/rooms/:id/end', async (req, res) => {
     
     activeRooms.set(roomId, room);
     io.emit('rooms_update', Array.from(activeRooms.values()));
-    io.to(roomId).emit('game_ended', { winner: winnerAddress, blockchainConfirmed: true });
+    
+    // Wyślij potwierdzenie że gra została zakończona na blockchainie
+    io.to(roomId).emit('game_ended', { 
+      winner: winnerAddress, 
+      blockchainConfirmed: true,
+      transactionSignature 
+    });
     
     console.log(`Game ${roomId} ended successfully`);
     res.json({ success: true });
   } catch (error) {
     console.error('Error ending game:', error);
     res.status(500).json({ error: 'Failed to end game' });
+  }
+});
+
+// Endpoint do czyszczenia nieaktywnych pokoi
+app.post('/api/rooms/cleanup', async (req, res) => {
+  try {
+    const now = Date.now();
+    const oneHourAgo = now - (60 * 60 * 1000); // 1 godzina
+    let cleaned = 0;
+    
+    for (const [roomId, room] of activeRooms) {
+      const roomAge = now - new Date(room.createdAt).getTime();
+      
+      // Usuń pokoje które:
+      // - Zostały utworzone ponad godzinę temu i nie rozpoczęły się
+      // - Lub mają zwycięzcę (gra się zakończyła)
+      if ((roomAge > oneHourAgo && !room.gameStarted) || room.winner) {
+        activeRooms.delete(roomId);
+        
+        // Usuń też grę jeśli istnieje
+        const game = games.get(roomId);
+        if (game) {
+          game.stop();
+          games.delete(roomId);
+        }
+        
+        cleaned++;
+      }
+    }
+    
+    console.log(`Cleaned ${cleaned} inactive rooms`);
+    res.json({ cleaned, activeRooms: activeRooms.size });
+  } catch (error) {
+    console.error('Error cleaning rooms:', error);
+    res.status(500).json({ error: 'Failed to clean rooms' });
   }
 });
 
@@ -391,19 +443,59 @@ io.on('connection', (socket) => {
 // Funkcja broadcastująca stan gry
 function broadcastGameState() {
   for (const [roomId, game] of games) {
-    if (!game.isRunning) continue;
-    
     const gameState = game.getGameState();
     
     // Wyślij stan gry do wszystkich w pokoju
     io.to(roomId).emit('game_state', gameState);
     
+    // Sprawdź czy gra się zakończyła
+    if (game.winner && game.isRunning === false && !endedGames.has(roomId)) {
+      const room = activeRooms.get(roomId);
+      if (room && !room.winner) {
+        room.winner = game.winner;
+        room.isActive = false;
+        room.endedAt = new Date().toISOString();
+        
+        activeRooms.set(roomId, room);
+        endedGames.add(roomId); // Oznacz grę jako zakończoną
+        
+        // Wyślij event tylko raz
+        io.to(roomId).emit('game_ended', { 
+          winner: game.winner,
+          reason: 'last_player_standing',
+          finalLeaderboard: game.leaderboard,
+          blockchainConfirmed: false
+        });
+        
+        console.log(`Game ${roomId} ended. Winner: ${game.winner}`);
+        
+        // Usuń grę z mapy po wysłaniu informacji o zakończeniu
+        setTimeout(() => {
+          games.delete(roomId);
+          // Usuń z endedGames po pewnym czasie
+          setTimeout(() => {
+            endedGames.delete(roomId);
+          }, 60000); // 1 minuta
+        }, 1000);
+      }
+    }
+    
     // Wyślij widok każdego gracza
     for (const [playerAddress, player] of game.players) {
       const socketId = playerSockets.get(playerAddress);
-      if (socketId && player.isAlive) {
-        const playerView = game.getPlayerView(playerAddress);
-        io.to(socketId).emit('player_view', playerView);
+      
+      if (socketId) {
+        if (!player.isAlive && game.isRunning) {
+          // Wyślij informację o śmierci gracza tylko gdy gra trwa
+          io.to(socketId).emit('player_eliminated', {
+            playerAddress,
+            eliminatedBy: 'another_player'
+          });
+        } else if (player.isAlive) {
+          // Wyślij normalny widok dla żywego gracza
+          const playerView = game.getPlayerView(playerAddress);
+          io.to(socketId).emit('player_view', playerView);
+        }
       }
     }
   }
@@ -448,6 +540,34 @@ async function endGameByTimeout(roomId) {
     console.log(`Game ${roomId} ended by timeout. Winner: ${winner}`);
   }
 }
+
+// Automatyczne czyszczenie nieaktywnych pokoi co 30 minut
+setInterval(() => {
+  const now = Date.now();
+  const thirtyMinutesAgo = now - (30 * 60 * 1000);
+  let cleaned = 0;
+  
+  for (const [roomId, room] of activeRooms) {
+    const roomAge = now - new Date(room.createdAt).getTime();
+    
+    // Usuń pokoje które są stare i nieaktywne
+    if ((roomAge > thirtyMinutesAgo && !room.gameStarted) || room.winner) {
+      activeRooms.delete(roomId);
+      
+      const game = games.get(roomId);
+      if (game) {
+        game.stop();
+        games.delete(roomId);
+      }
+      
+      cleaned++;
+    }
+  }
+  
+  if (cleaned > 0) {
+    console.log(`Auto-cleaned ${cleaned} inactive rooms`);
+  }
+}, 30 * 60 * 1000); // 30 minut
 
 // Start server
 const PORT = process.env.PORT || 3001;

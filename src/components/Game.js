@@ -19,6 +19,9 @@ export default function Game({ roomId, roomInfo, onBack }) {
   const [isGameEnded, setIsGameEnded] = useState(false);
   const [winner, setWinner] = useState(null);
   const [isClaiming, setIsClaiming] = useState(false);
+  const [isEndingGame, setIsEndingGame] = useState(false);
+  const [gameEndedOnBlockchain, setGameEndedOnBlockchain] = useState(false);
+  const endGameAttemptedRef = useRef(false);
   
   const canvasRef = useRef(null);
   const inputRef = useRef({
@@ -53,16 +56,60 @@ export default function Game({ roomId, roomInfo, onBack }) {
           setPlayerView(view);
         });
         
+        io.on('player_eliminated', (data) => {
+          if (data.playerAddress === publicKey.toString()) {
+            // Gracz został wyeliminowany
+            setPlayerView(prev => ({
+              ...prev,
+              player: { ...prev?.player, isAlive: false }
+            }));
+          }
+        });
+        
         io.on('game_ended', async (data) => {
+          console.log('Game ended event received:', data);
           setIsGameEnded(true);
           setWinner(data.winner);
           
-          // Jeśli wygrałeś, automatycznie zakończ grę na blockchainie
-          if (data.winner === publicKey.toString() && !data.blockchainConfirmed) {
+          // Jeśli gra została zakończona na blockchainie, oznacz to
+          if (data.blockchainConfirmed) {
+            setGameEndedOnBlockchain(true);
+            endGameAttemptedRef.current = true;
+          }
+          
+          // Jeśli wygrałeś i transakcja nie została jeszcze wysłana
+          if (data.winner === publicKey.toString() && 
+              !data.blockchainConfirmed && 
+              !isEndingGame && 
+              !gameEndedOnBlockchain &&
+              !endGameAttemptedRef.current) {
+            
+            console.log('Attempting to end game on blockchain...');
+            endGameAttemptedRef.current = true;
+            setIsEndingGame(true);
+            
             try {
-              await endGame(roomId, data.winner, wallet);
+              const result = await endGame(roomId, data.winner, wallet);
+              if (result.alreadyEnded) {
+                console.log('Game already ended on blockchain');
+                setGameEndedOnBlockchain(true);
+              } else {
+                console.log('Game ended successfully on blockchain');
+                setGameEndedOnBlockchain(true);
+              }
             } catch (error) {
-              console.error('Error ending game on blockchain:', error);
+              // Sprawdź czy błąd oznacza, że gra już została zakończona
+              if (error.message && (error.message.includes('invalid account data') || 
+                  error.message.includes('already been processed'))) {
+                console.log('Game already ended on blockchain');
+                setGameEndedOnBlockchain(true);
+              } else {
+                console.error('Error ending game on blockchain:', error);
+                // W przypadku błędu, zresetuj flagę aby można było spróbować ponownie
+                endGameAttemptedRef.current = false;
+              }
+            } finally {
+              setIsEndingGame(false);
             }
           }
         });
@@ -82,7 +129,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
         socket.disconnect();
       }
     };
-  }, [roomId, publicKey, wallet]);
+  }, [roomId, publicKey, wallet]);  // Usunięte isEndingGame i gameEndedOnBlockchain z dependencies
   
   // Wysyłanie inputu gracza
   useEffect(() => {
@@ -306,6 +353,24 @@ export default function Game({ roomId, roomInfo, onBack }) {
         playerView={playerView}
         onMouseMove={handleMouseMove}
       />
+      
+      {/* Ekran eliminacji (dla zjedzonego gracza) */}
+      {playerView && !playerView.player.isAlive && !isGameEnded && (
+        <div className="game-over-overlay">
+          <div className="game-over-content">
+            <h1>Zostałeś zjedzony!</h1>
+            <p>Możesz obserwować resztę gry lub wrócić do lobby.</p>
+            
+            <div className="spectator-info">
+              <h3>Pozostali gracze: {gameState?.playerCount || 0}</h3>
+            </div>
+            
+            <button onClick={onBack} className="back-btn">
+              Wróć do lobby
+            </button>
+          </div>
+        </div>
+      )}
       
       {/* Ekran końca gry */}
       {isGameEnded && (

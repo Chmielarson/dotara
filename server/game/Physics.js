@@ -12,6 +12,26 @@ class Physics {
     return distance < obj1.radius + obj2.radius;
   }
   
+  // Sprawdzanie kolizji między okręgami z procentem pokrycia
+  checkCircleCollisionWithOverlap(obj1, obj2, overlapPercent = 0.5) {
+    const distance = this.getDistance(obj1, obj2);
+    
+    // Jeśli nie ma żadnej kolizji, zwróć false
+    if (distance > obj1.radius + obj2.radius) {
+      return false;
+    }
+    
+    // Oblicz głębokość penetracji
+    const overlap = obj1.radius + obj2.radius - distance;
+    
+    // Sprawdź jaki procent mniejszego obiektu jest pokryty
+    const smallerRadius = Math.min(obj1.radius, obj2.radius);
+    const overlapRatio = overlap / (smallerRadius * 2);
+    
+    // Zwróć true tylko jeśli pokrycie jest większe niż wymagany procent
+    return overlapRatio >= overlapPercent;
+  }
+  
   // Obliczanie odległości między obiektami
   getDistance(obj1, obj2) {
     const dx = obj2.x - obj1.x;

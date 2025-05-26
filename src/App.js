@@ -9,7 +9,7 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import Lobby from './components/Lobby';
 import CreateGame from './components/CreateGame';
 import Game from './components/Game';
-import { joinRoom, startGame } from './utils/SolanaTransactions';
+import { joinRoom, startGame, getRoomsUpdates } from './utils/SolanaTransactions';
 import './App.css';
 import '@solana/wallet-adapter-react-ui/styles.css';
 import io from 'socket.io-client';
@@ -25,25 +25,50 @@ function AppContent() {
   const [currentView, setCurrentView] = useState('lobby');
   const [currentRoomId, setCurrentRoomId] = useState(null);
   const [currentRoomInfo, setCurrentRoomInfo] = useState(null);
-
+  const [socket, setSocket] = useState(null);
   
+  // Inicjalizacja socket.io
+  useEffect(() => {
+    const GAME_SERVER_URL = process.env.REACT_APP_GAME_SERVER_URL || 'http://localhost:3001';
+    const newSocket = io(GAME_SERVER_URL, {
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
+    
+    setSocket(newSocket);
+    
+    return () => {
+      newSocket.disconnect();
+    };
+  }, []);
   
   // Sprawdź czy użytkownik był w grze przed odświeżeniem
   useEffect(() => {
     const savedRoom = localStorage.getItem('solana_io_current_room');
-    if (savedRoom) {
+    if (savedRoom && publicKey) {
       const { roomId, roomInfo } = JSON.parse(savedRoom);
-      if (roomInfo.gameStarted) {
+      
+      // Sprawdź czy użytkownik jest w pokoju
+      if (roomInfo.players.includes(publicKey.toString())) {
         setCurrentRoomId(roomId);
         setCurrentRoomInfo(roomInfo);
-        setCurrentView('game');
+        
+        if (roomInfo.gameStarted) {
+          setCurrentView('game');
+        } else {
+          setCurrentView('waiting');
+        }
+      } else {
+        // Użytkownik nie jest w pokoju, wyczyść localStorage
+        localStorage.removeItem('solana_io_current_room');
       }
     }
-  }, []);
+  }, [publicKey]);
   
   // Zapisz stan gry
   useEffect(() => {
-    if (currentRoomId && currentRoomInfo && currentView === 'game') {
+    if (currentRoomId && currentRoomInfo && (currentView === 'game' || currentView === 'waiting')) {
       localStorage.setItem('solana_io_current_room', JSON.stringify({
         roomId: currentRoomId,
         roomInfo: currentRoomInfo
@@ -52,6 +77,73 @@ function AppContent() {
       localStorage.removeItem('solana_io_current_room');
     }
   }, [currentRoomId, currentRoomInfo, currentView]);
+  
+  // Nasłuchuj na aktualizacje pokoju
+  useEffect(() => {
+    if (!socket || !currentRoomId || currentView !== 'waiting') return;
+    
+    const handleRoomsUpdate = (rooms) => {
+      const updatedRoom = rooms.find(r => r.id === currentRoomId);
+      if (updatedRoom) {
+        setCurrentRoomInfo({
+          ...updatedRoom,
+          currentPlayers: updatedRoom.players.length // Dodaj currentPlayers dla kompatybilności
+        });
+      }
+    };
+    
+    const handleGameStarted = (data) => {
+      if (data.roomId === currentRoomId) {
+        // Gra została rozpoczęta
+        setCurrentView('game');
+      }
+    };
+    
+    // Nasłuchuj na aktualizacje
+    socket.on('rooms_update', handleRoomsUpdate);
+    socket.on('game_started', handleGameStarted);
+    
+    // Poproś o aktualizacje
+    socket.emit('get_rooms');
+    
+    return () => {
+      socket.off('rooms_update', handleRoomsUpdate);
+      socket.off('game_started', handleGameStarted);
+    };
+  }, [socket, currentRoomId, currentView]);
+  
+  // Okresowe odświeżanie danych pokoju
+  useEffect(() => {
+    if (!currentRoomId || currentView !== 'waiting') return;
+    
+    const fetchRoomInfo = async () => {
+      try {
+        const response = await fetch(`${process.env.REACT_APP_GAME_SERVER_URL || 'http://localhost:3001'}/api/rooms/${currentRoomId}`);
+        if (response.ok) {
+          const roomInfo = await response.json();
+          setCurrentRoomInfo({
+            ...roomInfo,
+            currentPlayers: roomInfo.players.length
+          });
+          
+          // Jeśli gra się rozpoczęła, przejdź do widoku gry
+          if (roomInfo.gameStarted) {
+            setCurrentView('game');
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching room info:', error);
+      }
+    };
+    
+    // Pobierz dane natychmiast
+    fetchRoomInfo();
+    
+    // Następnie co 2 sekundy
+    const interval = setInterval(fetchRoomInfo, 2000);
+    
+    return () => clearInterval(interval);
+  }, [currentRoomId, currentView]);
   
   const handleJoinRoom = async (roomId) => {
     if (!publicKey) {
@@ -65,7 +157,10 @@ function AppContent() {
       const roomInfo = await response.json();
       
       setCurrentRoomId(roomId);
-      setCurrentRoomInfo(roomInfo);
+      setCurrentRoomInfo({
+        ...roomInfo,
+        currentPlayers: roomInfo.players.length
+      });
       
       // Sprawdź czy gracz jest już w pokoju
       if (roomInfo.players.includes(publicKey.toString())) {
@@ -82,7 +177,10 @@ function AppContent() {
         // Odśwież informacje o pokoju
         const updatedResponse = await fetch(`${process.env.REACT_APP_GAME_SERVER_URL || 'http://localhost:3001'}/api/rooms/${roomId}`);
         const updatedRoomInfo = await updatedResponse.json();
-        setCurrentRoomInfo(updatedRoomInfo);
+        setCurrentRoomInfo({
+          ...updatedRoomInfo,
+          currentPlayers: updatedRoomInfo.players.length
+        });
         
         setCurrentView('waiting');
       }
@@ -107,7 +205,10 @@ function AppContent() {
       const roomInfo = await response.json();
       
       setCurrentRoomId(roomId);
-      setCurrentRoomInfo(roomInfo);
+      setCurrentRoomInfo({
+        ...roomInfo,
+        currentPlayers: roomInfo.players.length
+      });
       setCurrentView('waiting');
     } catch (error) {
       console.error('Error fetching room info:', error);
@@ -120,11 +221,7 @@ function AppContent() {
     try {
       await startGame(currentRoomId, wallet);
       
-      // Odśwież informacje o pokoju
-      const response = await fetch(`${process.env.REACT_APP_GAME_SERVER_URL || 'http://localhost:3001'}/api/rooms/${currentRoomId}`);
-      const updatedRoomInfo = await response.json();
-      setCurrentRoomInfo(updatedRoomInfo);
-      
+      // Nie czekaj na odświeżenie, przejdź od razu do gry
       setCurrentView('game');
     } catch (error) {
       console.error('Error starting game:', error);
@@ -136,6 +233,7 @@ function AppContent() {
     setCurrentView('lobby');
     setCurrentRoomId(null);
     setCurrentRoomInfo(null);
+    localStorage.removeItem('solana_io_current_room');
   };
   
   return (
@@ -175,9 +273,9 @@ function AppContent() {
             <h2>Oczekiwanie na graczy</h2>
             <div className="room-details">
               <p>ID Pokoju: {currentRoomId}</p>
-              <p>Gracze: {currentRoomInfo.players.length}/{currentRoomInfo.maxPlayers}</p>
+              <p>Gracze: {currentRoomInfo.currentPlayers || currentRoomInfo.players.length}/{currentRoomInfo.maxPlayers}</p>
               <p>Wpisowe: {currentRoomInfo.entryFee} SOL</p>
-              <p>Pula: {currentRoomInfo.entryFee * currentRoomInfo.players.length} SOL</p>
+              <p>Pula: {currentRoomInfo.entryFee * (currentRoomInfo.currentPlayers || currentRoomInfo.players.length)} SOL</p>
             </div>
             
             <div className="players-waiting">
@@ -186,6 +284,7 @@ function AppContent() {
                 <div key={player} className="player-waiting">
                   {player.substring(0, 8)}...{player.substring(player.length - 8)}
                   {index === 0 && ' 👑'}
+                  {player === publicKey?.toString() && ' (Ty)'}
                 </div>
               ))}
             </div>
@@ -213,10 +312,7 @@ function AppContent() {
       </main>
     </div>
   );
-  
-  
 }
-
 
 export default function App() {
   return (

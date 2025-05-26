@@ -1,0 +1,214 @@
+/* src/App.css */
+.app {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: white;
+  backdrop-filter: blur(10px);
+}
+
+.header-content h1 {
+  margin: 0;
+  font-size: 32px;
+}
+
+.header-content p {
+  margin: 5px 0 0 0;
+  opacity: 0.9;
+}
+
+.wallet-section {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.wallet-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.balance {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+/* Waiting Room Styles */
+.waiting-room {
+  background: white;
+  border-radius: 20px;
+  padding: 40px;
+  max-width: 600px;
+  width: 100%;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.1);
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.waiting-room h2 {
+  margin: 0 0 30px 0;
+  text-align: center;
+  color: #333;
+}
+
+.room-details {
+  background: #f8f9fa;
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 30px;
+}
+
+.room-details p {
+  margin: 10px 0;
+  font-size: 16px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.room-details p:first-child {
+  margin-top: 0;
+}
+
+.room-details p:last-child {
+  margin-bottom: 0;
+  font-weight: bold;
+  color: #2ecc71;
+}
+
+.players-waiting {
+  margin-bottom: 30px;
+}
+
+.players-waiting h3 {
+  margin: 0 0 15px 0;
+  color: #333;
+}
+
+.player-waiting {
+  background: #ecf0f1;
+  padding: 12px 20px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  font-family: monospace;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.player-waiting:last-child {
+  margin-bottom: 0;
+}
+
+.start-game-btn {
+  width: 100%;
+  padding: 15px;
+  background: #2ecc71;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s;
+  margin-bottom: 10px;
+}
+
+.start-game-btn:hover {
+  background: #27ae60;
+  transform: scale(1.02);
+}
+
+.start-game-btn:active {
+  transform: scale(0.98);
+}
+
+.back-btn {
+  width: 100%;
+  padding: 15px;
+  background: #95a5a6;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.back-btn:hover {
+  background: #7f8c8d;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .app-header {
+    flex-direction: column;
+    gap: 20px;
+  }
+  
+  .header-content {
+    text-align: center;
+  }
+  
+  .waiting-room {
+    padding: 20px;
+  }
+  
+  .room-details {
+    padding: 15px;
+  }
+  
+  .room-details p {
+    font-size: 14px;
+  }
+}
+
+/* Wallet Adapter Overrides */
+.wallet-adapter-button {
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(10px);
+}
+
+.wallet-adapter-button:hover {
+  background: rgba(255, 255, 255, 0.2) !important;
+}
