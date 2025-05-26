@@ -12,12 +12,24 @@ import io from 'socket.io-client';
 import { Buffer } from 'buffer';
 
 // Konfiguracja
-const NETWORK = process.env.REACT_APP_SOLANA_NETWORK || 'devnet';
+const NETWORK = 'devnet';
 const connection = new Connection(clusterApiUrl(NETWORK), 'confirmed');
-const GAME_SERVER_URL = process.env.REACT_APP_GAME_SERVER_URL || 'http://localhost:3001';
-const PROGRAM_ID = new PublicKey(process.env.REACT_APP_PROGRAM_ID || 'YOUR_PROGRAM_ID_HERE');
+
+// Hardcoded URL - zmień jeśli serwer działa na innym porcie
+const GAME_SERVER_URL = 'http://localhost:3001';
+
+console.log('Using game server URL:', GAME_SERVER_URL);
+
+// Twój Program ID
+const PROGRAM_ID = new PublicKey('EhP1ossEJvx2hrRWhbsQDUVoUoFbWGjap3uxZsjMaknH');
 const SYSVAR_RENT_PUBKEY = new PublicKey('SysvarRent111111111111111111111111111111111');
 const PLATFORM_FEE_WALLET = new PublicKey('FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8');
+
+console.log('Solana configuration loaded:', {
+  NETWORK,
+  PROGRAM_ID: PROGRAM_ID.toString(),
+  GAME_SERVER_URL
+});
 
 let socket = null;
 
@@ -29,7 +41,8 @@ function serializeCreateRoomData(maxPlayers, entryFee, roomSlot, gameDuration, m
   
   buffer.writeUInt8(0, 0); // CreateRoom instruction
   buffer.writeUInt8(maxPlayers, 1);
-  buffer.writeBigUInt64LE(BigInt(Math.round(entryFee * LAMPORTS_PER_SOL)), 2);
+  const lamportsAmount = Math.floor(entryFee * LAMPORTS_PER_SOL);
+  buffer.writeBigUInt64LE(BigInt(lamportsAmount), 2);
   buffer.writeUInt8(roomSlot, 10);
   buffer.writeUInt16LE(gameDuration, 11);
   buffer.writeUInt16LE(mapSize, 13);
@@ -51,13 +64,6 @@ function serializeStartGameData(gameId) {
   buffer.writeUInt32LE(gameIdBytes.length, 1);
   gameIdBytes.copy(buffer, 5);
   
-  return buffer;
-}
-
-function serializeEliminatePlayerData(playerPubkey) {
-  const buffer = Buffer.alloc(1 + 32);
-  buffer.writeUInt8(3, 0); // EliminatePlayer instruction
-  playerPubkey.toBuffer().copy(buffer, 1);
   return buffer;
 }
 
@@ -136,28 +142,34 @@ export async function createRoom(maxPlayers, entryFee, mapSize, gameDuration, wa
   // Znajdź wolny slot
   let roomSlot = 0;
   let gamePDA = null;
-  let bump = null;
   
   for (let slot = 0; slot < 10; slot++) {
-    const [pda, bumpSeed] = await findGamePDA(publicKey, slot);
+    const [pda] = await findGamePDA(publicKey, slot);
     
     try {
       const accountInfo = await connection.getAccountInfo(pda);
       if (!accountInfo) {
         roomSlot = slot;
         gamePDA = pda;
-        bump = bumpSeed;
         break;
       }
     } catch {
       roomSlot = slot;
       gamePDA = pda;
-      bump = bumpSeed;
       break;
     }
   }
   
   if (!gamePDA) throw new Error('All room slots are occupied');
+  
+  console.log('Creating room:', {
+    roomSlot,
+    gamePDA: gamePDA.toString(),
+    maxPlayers,
+    entryFee,
+    mapSize,
+    gameDuration
+  });
   
   // Serializuj dane
   const data = serializeCreateRoomData(maxPlayers, entryFee, roomSlot, gameDuration, mapSize);
@@ -183,14 +195,18 @@ export async function createRoom(maxPlayers, entryFee, mapSize, gameDuration, wa
   const signedTransaction = await signTransaction(transaction);
   const signature = await connection.sendRawTransaction(signedTransaction.serialize());
   
+  console.log('Transaction sent:', signature);
+  
   await connection.confirmTransaction({
     blockhash,
     lastValidBlockHeight,
     signature
   }, 'confirmed');
   
+  console.log('Transaction confirmed');
+  
   // Zarejestruj na serwerze
-  const response = await fetch(`${GAME_SERVER_URL}/api/rooms`, {
+  const response = await fetch('http://localhost:3001/api/rooms', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -204,6 +220,10 @@ export async function createRoom(maxPlayers, entryFee, mapSize, gameDuration, wa
     })
   });
   
+  if (!response.ok) {
+    throw new Error('Failed to register room on server');
+  }
+  
   const roomData = await response.json();
   return roomData.roomId;
 }
@@ -215,6 +235,9 @@ export async function joinRoom(roomId, entryFee, wallet) {
   
   // Pobierz dane pokoju
   const response = await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch room data');
+  }
   const roomData = await response.json();
   
   const roomPDA = new PublicKey(roomData.roomAddress);
@@ -263,6 +286,9 @@ export async function startGame(roomId, wallet) {
   if (!publicKey) throw new Error('Wallet not connected');
   
   const response = await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch room data');
+  }
   const roomData = await response.json();
   
   const gameId = `game_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
@@ -312,6 +338,9 @@ export async function endGame(roomId, winnerAddress, wallet) {
   if (!publicKey) throw new Error('Wallet not connected');
   
   const response = await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch room data');
+  }
   const roomData = await response.json();
   
   if (roomData.blockchainEnded) return { success: true, alreadyEnded: true };
@@ -362,6 +391,9 @@ export async function claimPrize(roomId, wallet) {
   if (!publicKey) throw new Error('Wallet not connected');
   
   const response = await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch room data');
+  }
   const roomData = await response.json();
   
   if (roomData.winner !== publicKey.toString()) {

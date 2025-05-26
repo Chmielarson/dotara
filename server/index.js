@@ -13,6 +13,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Dodaj middleware do logowania
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -24,7 +30,7 @@ const io = new Server(server, {
 // Konfiguracja Solana
 const SOLANA_NETWORK = process.env.SOLANA_NETWORK || 'devnet';
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || clusterApiUrl(SOLANA_NETWORK);
-const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID);
+const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || 'EhP1ossEJvx2hrRWhbsQDUVoUoFbWGjap3uxZsjMaknH');
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
@@ -54,6 +60,34 @@ app.get('/api/rooms', (req, res) => {
   res.json(rooms);
 });
 
+// Endpoint dla pojedynczego pokoju
+app.get('/api/rooms/:id', (req, res) => {
+  const roomId = req.params.id;
+  const room = activeRooms.get(roomId);
+  
+  console.log(`GET /api/rooms/${roomId} - ${room ? 'found' : 'not found'}`);
+  
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  
+  res.json({
+    id: room.id,
+    creatorAddress: room.creatorAddress,
+    maxPlayers: room.maxPlayers,
+    entryFee: room.entryFee,
+    currentPlayers: room.players.length,
+    players: room.players,
+    gameStarted: room.gameStarted,
+    roomAddress: room.roomAddress,
+    mapSize: room.mapSize,
+    gameDuration: room.gameDuration,
+    winner: room.winner,
+    isActive: room.isActive,
+    gameStartedAt: room.gameStartedAt
+  });
+});
+
 app.post('/api/rooms', async (req, res) => {
   try {
     const { 
@@ -62,8 +96,18 @@ app.post('/api/rooms', async (req, res) => {
       entryFee, 
       roomAddress, 
       mapSize,
-      gameDuration
+      gameDuration,
+      transactionSignature
     } = req.body;
+    
+    console.log('Creating room:', {
+      creatorAddress,
+      maxPlayers,
+      entryFee,
+      roomAddress,
+      mapSize,
+      gameDuration
+    });
     
     const roomId = `room_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     
@@ -80,7 +124,8 @@ app.post('/api/rooms', async (req, res) => {
       isActive: true,
       mapSize: mapSize || 3000,
       gameDuration: gameDuration || 10,
-      blockchainEnded: false
+      blockchainEnded: false,
+      transactionSignature
     };
     
     activeRooms.set(roomId, room);
@@ -88,17 +133,20 @@ app.post('/api/rooms', async (req, res) => {
     // Emit to all clients
     io.emit('rooms_update', Array.from(activeRooms.values()));
     
+    console.log(`Room created successfully: ${roomId}`);
     res.status(201).json({ roomId, ...room });
   } catch (error) {
     console.error('Error creating room:', error);
-    res.status(500).json({ error: 'Failed to create room' });
+    res.status(500).json({ error: 'Failed to create room', details: error.message });
   }
 });
 
 app.post('/api/rooms/:id/join', async (req, res) => {
   try {
     const roomId = req.params.id;
-    const { playerAddress } = req.body;
+    const { playerAddress, transactionSignature } = req.body;
+    
+    console.log(`Player ${playerAddress} joining room ${roomId}`);
     
     const room = activeRooms.get(roomId);
     if (!room) {
@@ -115,6 +163,9 @@ app.post('/api/rooms/:id/join', async (req, res) => {
     
     if (!room.players.includes(playerAddress)) {
       room.players.push(playerAddress);
+      console.log(`Player ${playerAddress} added to room ${roomId}`);
+    } else {
+      console.log(`Player ${playerAddress} already in room ${roomId}`);
     }
     
     activeRooms.set(roomId, room);
@@ -123,14 +174,16 @@ app.post('/api/rooms/:id/join', async (req, res) => {
     res.json({ success: true, room });
   } catch (error) {
     console.error('Error joining room:', error);
-    res.status(500).json({ error: 'Failed to join room' });
+    res.status(500).json({ error: 'Failed to join room', details: error.message });
   }
 });
 
 app.post('/api/rooms/:id/start', async (req, res) => {
   try {
     const roomId = req.params.id;
-    const { gameId, initiatorAddress } = req.body;
+    const { gameId, initiatorAddress, transactionSignature } = req.body;
+    
+    console.log(`Starting game ${roomId} by ${initiatorAddress}`);
     
     const room = activeRooms.get(roomId);
     if (!room) {
@@ -142,7 +195,7 @@ app.post('/api/rooms/:id/start', async (req, res) => {
     }
     
     if (!room.players.includes(initiatorAddress)) {
-      return res.status(403).json({ error: 'Not authorized' });
+      return res.status(403).json({ error: 'Not authorized - not a player in this room' });
     }
     
     if (room.players.length < 2) {
@@ -153,6 +206,7 @@ app.post('/api/rooms/:id/start', async (req, res) => {
     room.gameStarted = true;
     room.gameId = gameId;
     room.gameStartedAt = new Date().toISOString();
+    room.transactionSignature = transactionSignature;
     
     // Utwórz instancję gry
     const game = new GameEngine(roomId, room.mapSize);
@@ -177,10 +231,11 @@ app.post('/api/rooms/:id/start', async (req, res) => {
       endGameByTimeout(roomId);
     }, room.gameDuration * 60 * 1000);
     
+    console.log(`Game ${roomId} started successfully`);
     res.json({ success: true, gameId });
   } catch (error) {
     console.error('Error starting game:', error);
-    res.status(500).json({ error: 'Failed to start game' });
+    res.status(500).json({ error: 'Failed to start game', details: error.message });
   }
 });
 
@@ -217,7 +272,9 @@ app.post('/api/rooms/:id/eliminate', async (req, res) => {
 app.post('/api/rooms/:id/end', async (req, res) => {
   try {
     const roomId = req.params.id;
-    const { winnerAddress } = req.body;
+    const { winnerAddress, transactionSignature } = req.body;
+    
+    console.log(`Ending game ${roomId}, winner: ${winnerAddress}`);
     
     const room = activeRooms.get(roomId);
     if (!room) {
@@ -228,6 +285,7 @@ app.post('/api/rooms/:id/end', async (req, res) => {
     room.isActive = false;
     room.blockchainEnded = true;
     room.endedAt = new Date().toISOString();
+    room.endTransactionSignature = transactionSignature;
     
     const game = games.get(roomId);
     if (game) {
@@ -239,11 +297,22 @@ app.post('/api/rooms/:id/end', async (req, res) => {
     io.emit('rooms_update', Array.from(activeRooms.values()));
     io.to(roomId).emit('game_ended', { winner: winnerAddress, blockchainConfirmed: true });
     
+    console.log(`Game ${roomId} ended successfully`);
     res.json({ success: true });
   } catch (error) {
     console.error('Error ending game:', error);
     res.status(500).json({ error: 'Failed to end game' });
   }
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    activeRooms: activeRooms.size,
+    activeGames: games.size
+  });
 });
 
 // Socket.IO handlers
@@ -286,7 +355,14 @@ io.on('connection', (socket) => {
     const player = game.players.get(playerAddress);
     if (player) {
       player.nickname = nickname;
+      console.log(`Player ${playerAddress} set nickname to: ${nickname}`);
     }
+  });
+  
+  socket.on('get_rooms', () => {
+    const rooms = Array.from(activeRooms.values())
+      .filter(room => room.isActive && !room.winner);
+    socket.emit('rooms_update', rooms);
   });
   
   socket.on('disconnect', () => {
@@ -379,4 +455,11 @@ server.listen(PORT, () => {
   console.log(`Solana.io server running on port ${PORT}`);
   console.log(`Connected to Solana ${SOLANA_NETWORK}`);
   console.log(`Program ID: ${PROGRAM_ID.toString()}`);
+  console.log(`Server URL: http://localhost:${PORT}`);
+  console.log('Available endpoints:');
+  console.log(`  GET  http://localhost:${PORT}/api/rooms`);
+  console.log(`  GET  http://localhost:${PORT}/api/rooms/:id`);
+  console.log(`  POST http://localhost:${PORT}/api/rooms`);
+  console.log(`  POST http://localhost:${PORT}/api/rooms/:id/join`);
+  console.log(`  POST http://localhost:${PORT}/api/rooms/:id/start`);
 });

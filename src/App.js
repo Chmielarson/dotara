@@ -12,6 +12,7 @@ import Game from './components/Game';
 import { joinRoom, startGame } from './utils/SolanaTransactions';
 import './App.css';
 import '@solana/wallet-adapter-react-ui/styles.css';
+import io from 'socket.io-client';
 
 const network = WalletAdapterNetwork.Devnet;
 const endpoint = clusterApiUrl(network);
@@ -24,6 +25,8 @@ function AppContent() {
   const [currentView, setCurrentView] = useState('lobby');
   const [currentRoomId, setCurrentRoomId] = useState(null);
   const [currentRoomInfo, setCurrentRoomInfo] = useState(null);
+
+  
   
   // Sprawdź czy użytkownik był w grze przed odświeżeniem
   useEffect(() => {
@@ -210,7 +213,10 @@ function AppContent() {
       </main>
     </div>
   );
+  
+  
 }
+
 
 export default function App() {
   return (
