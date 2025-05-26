@@ -1,14 +1,8 @@
 /* src/components/CreateGame.css */
 .create-game {
-  max-width: 500px;
+  max-width: 1000px;
   margin: 20px auto;
-  background: white;
-  border: 4px solid #34495E;
-  border-radius: 20px;
-  padding: 40px;
-  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
-  position: relative;
-  z-index: 5;
+  padding: 0 20px;
 }
 
 .create-game h2 {
@@ -17,6 +11,37 @@
   color: #E74C3C;
   font-size: 28px;
   font-weight: 700;
+}
+
+.form-layout {
+  display: flex;
+  gap: 30px;
+  align-items: stretch;
+}
+
+.form-left,
+.form-right {
+  background: white;
+  border: 4px solid #34495E;
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
+  position: relative;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-left {
+  flex: 1;
+  border-color: #16A085;
+}
+
+.form-right {
+  flex: 1;
+  border-color: #8E44AD;
+  justify-content: center;
+  gap: 30px;
 }
 
 .form-container {
@@ -77,38 +102,56 @@
   display: block;
 }
 
+.prize-section {
+  display: flex;
+  flex-direction: column;
+  gap: 25px;
+  width: 100%;
+}
+
 .prize-info {
   background: #ECF0F1;
   border: 3px solid #34495E;
   border-radius: 15px;
-  padding: 20px;
-  margin: 20px 0;
+  padding: 30px;
+  width: 100%;
 }
 
 .prize-info h3 {
-  margin: 0 0 16px 0;
+  margin: 0 0 25px 0;
   color: #16A085;
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 700;
+  text-align: center;
 }
 
 .prize-row {
   display: flex;
   justify-content: space-between;
-  padding: 10px 0;
-  font-size: 15px;
+  align-items: center;
+  padding: 15px 0;
+  font-size: 18px;
   font-weight: 700;
 }
 
-.prize-row:nth-child(1) { color: #E74C3C; }
-.prize-row:nth-child(2) { color: #8E44AD; }
+.prize-row span:first-child {
+  flex: 1;
+}
+
+.prize-row span:last-child {
+  text-align: right;
+  min-width: 120px;
+}
+
+.prize-row:nth-child(2) { color: #E74C3C; }
+.prize-row:nth-child(3) { color: #8E44AD; }
 
 .prize-row.highlight {
   color: #16A085;
-  font-size: 20px;
-  padding-top: 12px;
-  border-top: 2px solid #95A5A6;
-  margin-top: 8px;
+  font-size: 24px;
+  padding-top: 20px;
+  border-top: 3px solid #95A5A6;
+  margin-top: 15px;
 }
 
 .error-message {
@@ -116,25 +159,25 @@
   color: #C0392B;
   padding: 14px 18px;
   border-radius: 12px;
-  margin: 16px 0;
   text-align: center;
   font-size: 15px;
   font-weight: 700;
   border: 3px solid #E74C3C;
+  width: 100%;
 }
 
 .form-actions {
   display: flex;
-  gap: 12px;
-  margin-top: 30px;
+  gap: 15px;
+  width: 100%;
 }
 
 .form-actions button {
   flex: 1;
-  padding: 16px;
+  padding: 18px 24px;
   border: none;
   border-radius: 12px;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s;
@@ -173,10 +216,27 @@
 }
 
 /* Responsive */
-@media (max-width: 600px) {
+@media (max-width: 768px) {
   .create-game {
+    padding: 0 10px;
+  }
+  
+  .form-layout {
+    flex-direction: column;
+  }
+  
+  .form-left,
+  .form-right {
+    width: 100%;
     padding: 25px;
-    margin: 10px;
+  }
+  
+  .prize-row {
+    font-size: 16px;
+  }
+  
+  .prize-row.highlight {
+    font-size: 20px;
   }
   
   .form-actions {

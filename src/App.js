@@ -82,6 +82,19 @@ function AppContent() {
     }
   }, [currentRoomId, currentRoomInfo, currentView]);
   
+  // Zarządzaj klasą body dla gry
+  useEffect(() => {
+    if (currentView === 'game') {
+      document.body.classList.add('game-active');
+    } else {
+      document.body.classList.remove('game-active');
+    }
+    
+    return () => {
+      document.body.classList.remove('game-active');
+    };
+  }, [currentView]);
+  
   // Listen for room updates
   useEffect(() => {
     if (!socket || !currentRoomId || currentView !== 'waiting') return;
@@ -93,6 +106,10 @@ function AppContent() {
           ...updatedRoom,
           currentPlayers: updatedRoom.players.length
         });
+      } else {
+        // Pokój został usunięty
+        alert('Room has been cancelled');
+        handleBack();
       }
     };
     
@@ -143,6 +160,10 @@ function AppContent() {
           if (roomInfo.gameStarted) {
             setCurrentView('game');
           }
+        } else if (response.status === 404) {
+          // Pokój nie istnieje
+          alert('Room no longer exists');
+          handleBack();
         }
       } catch (error) {
         console.error('Error fetching room info:', error);
@@ -269,6 +290,11 @@ function AppContent() {
       await cancelRoom(currentRoomId, wallet);
       
       alert('Room cancelled successfully. Funds have been returned.');
+      
+      // Emit room cancelled event through socket
+      if (socket) {
+        socket.emit('room_cancelled', { roomId: currentRoomId });
+      }
       
       // Wróć do lobby
       handleBack();

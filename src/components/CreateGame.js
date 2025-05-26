@@ -88,102 +88,112 @@ export default function CreateGame({ onBack, onRoomCreated }) {
     <div className="create-game">
       <h2>Create new game</h2>
       
-      <div className="form-container">
-        <div className="form-group">
-          <label>
-            Maximum players
-            <input
-              type="number"
-              name="maxPlayers"
-              value={formData.maxPlayers}
-              onChange={handleChange}
-              min="2"
-              max="20"
-              required
-            />
-            <span className="hint">From 2 to 20 players</span>
-          </label>
-        </div>
-        
-        <div className="form-group">
-          <label>
-            Entry fee (SOL)
-            <input
-              type="number"
-              name="entryFee"
-              value={formData.entryFee}
-              onChange={handleChange}
-              min="0.01"
-              max="10"
-              step="0.01"
-              required
-            />
-            <span className="hint">From 0.01 to 10 SOL</span>
-          </label>
-        </div>
-        
-        <div className="form-group">
-          <label>
-            Map size
-            <input
-              type="number"
-              name="mapSize"
-              value={formData.mapSize}
-              onChange={handleChange}
-              min="1000"
-              max="10000"
-              step="500"
-              required
-            />
-            <span className="hint">From 1000 to 10000 units</span>
-          </label>
-        </div>
-        
-        <div className="form-group">
-          <label>
-            Game time (minutes)
-            <input
-              type="number"
-              name="gameDuration"
-              value={formData.gameDuration}
-              onChange={handleChange}
-              min="5"
-              max="60"
-              required
-            />
-            <span className="hint">From 5 to 60 minutes</span>
-          </label>
-        </div>
-        
-        <div className="prize-info">
-          <h3>Prize information</h3>
-          <div className="prize-row">
-            <span>Total pool:</span>
-            <span>{prize.total.toFixed(2)} SOL</span>
-          </div>
-          <div className="prize-row">
-            <span>Platform fee (5%):</span>
-            <span>{prize.platformFee.toFixed(2)} SOL</span>
-          </div>
-          <div className="prize-row highlight">
-            <span>Winner prize:</span>
-            <span>{prize.winnerPrize.toFixed(2)} SOL</span>
+      <div className="form-layout">
+        {/* Left box - Room settings */}
+        <div className="form-left">
+          <div className="form-container">
+            <div className="form-group">
+              <label>
+                Maximum players
+                <input
+                  type="number"
+                  name="maxPlayers"
+                  value={formData.maxPlayers}
+                  onChange={handleChange}
+                  min="2"
+                  max="20"
+                  required
+                />
+                <span className="hint">From 2 to 20 players</span>
+              </label>
+            </div>
+            
+            <div className="form-group">
+              <label>
+                Entry fee (SOL)
+                <input
+                  type="number"
+                  name="entryFee"
+                  value={formData.entryFee}
+                  onChange={handleChange}
+                  min="0.01"
+                  max="10"
+                  step="0.01"
+                  required
+                />
+                <span className="hint">From 0.01 to 10 SOL</span>
+              </label>
+            </div>
+            
+            <div className="form-group">
+              <label>
+                Map size
+                <input
+                  type="number"
+                  name="mapSize"
+                  value={formData.mapSize}
+                  onChange={handleChange}
+                  min="1000"
+                  max="10000"
+                  step="500"
+                  required
+                />
+                <span className="hint">From 1000 to 10000 units</span>
+              </label>
+            </div>
+            
+            <div className="form-group">
+              <label>
+                Game time (minutes)
+                <input
+                  type="number"
+                  name="gameDuration"
+                  value={formData.gameDuration}
+                  onChange={handleChange}
+                  min="5"
+                  max="60"
+                  required
+                />
+                <span className="hint">From 5 to 60 minutes</span>
+              </label>
+            </div>
           </div>
         </div>
         
-        {error && (
-          <div className="error-message">
-            {error}
+        {/* Right box - Prize information and actions */}
+        <div className="form-right">
+          <div className="prize-section">
+            <div className="prize-info">
+              <h3>Prize information</h3>
+              <div className="prize-row">
+                <span>Total pool:</span>
+                <span>{prize.total.toFixed(2)} SOL</span>
+              </div>
+              <div className="prize-row">
+                <span>Platform fee (5%):</span>
+                <span>{prize.platformFee.toFixed(2)} SOL</span>
+              </div>
+              <div className="prize-row highlight">
+                <span>Winner prize:</span>
+                <span>{prize.winnerPrize.toFixed(2)} SOL</span>
+              </div>
+            </div>
+            
+            {error && (
+              <div className="error-message">
+                {error}
+              </div>
+            )}
           </div>
-        )}
-        
-        <div className="form-actions">
-          <button type="button" onClick={onBack} className="cancel-btn">
-            Cancel
-          </button>
-          <button onClick={handleSubmit} disabled={isCreating} className="submit-btn">
-            {isCreating ? 'Creating...' : 'Create room'}
-          </button>
+          
+          <div className="form-actions">
+            <button type="button" onClick={onBack} className="cancel-btn">
+              Cancel
+            </button>
+            <button onClick={handleSubmit} disabled={isCreating} className="submit-btn">
+              {isCreating ? 'Creating...' : 'Create room'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

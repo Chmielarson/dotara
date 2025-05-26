@@ -79,12 +79,22 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       
       const { player, players, food, gameState } = playerView;
       
+      // Dynamiczny zoom bazowany na rozmiarze gracza i okna
+      const screenSize = Math.min(canvas.width, canvas.height);
+      const baseZoom = screenSize / 800; // Skaluj względem rozmiaru okna
+      // Znacznie wolniejsze oddalanie - zmniejszone o 70%
+      const playerZoom = Math.max(0.8, Math.min(1.5, 100 / (player.radius * 0.3 + 50)));
+      const zoomLevel = baseZoom * playerZoom;
+      
       // Oblicz przesunięcie kamery
-      const cameraX = player.x - canvas.width / 2;
-      const cameraY = player.y - canvas.height / 2;
+      const cameraX = player.x - canvas.width / 2 / zoomLevel;
+      const cameraY = player.y - canvas.height / 2 / zoomLevel;
       
       // Zapisz stan kontekstu
       ctx.save();
+      
+      // Zastosuj zoom
+      ctx.scale(zoomLevel, zoomLevel);
       
       // Przesuń canvas względem gracza
       ctx.translate(-cameraX, -cameraY);
@@ -95,8 +105,8 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
         ctx.fillRect(
           Math.floor(cameraX / 50) * 50,
           Math.floor(cameraY / 50) * 50,
-          canvas.width + 100,
-          canvas.height + 100
+          (canvas.width / zoomLevel) + 100,
+          (canvas.height / zoomLevel) + 100
         );
       }
       

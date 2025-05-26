@@ -4,10 +4,13 @@ const Food = require('./Food');
 const Physics = require('./Physics');
 
 class GameEngine {
-  constructor(roomId, mapSize = 3000, maxFood = 170) { // Zmniejszone z 500 na 170 (około 70% mniej)
+  constructor(roomId, mapSize = 3000) {
     this.roomId = roomId;
     this.mapSize = mapSize;
-    this.maxFood = maxFood;
+    // Ilość jedzenia proporcjonalna do wielkości mapy
+    // Bazowo: 170 jedzenia dla mapy 3000x3000
+    // Skaluje się kwadratowo z powierzchnią mapy
+    this.maxFood = Math.floor(170 * (mapSize / 3000) * (mapSize / 3000));
     this.players = new Map();
     this.food = new Map();
     this.physics = new Physics();
@@ -18,6 +21,8 @@ class GameEngine {
     this.leaderboard = [];
     this.winner = null;
     this.eliminatedPlayers = new Set();
+    
+    console.log(`Game ${roomId} created with map size ${mapSize} and ${this.maxFood} food items`);
     
     // Inicjalizuj jedzenie
     this.initializeFood();
@@ -200,7 +205,7 @@ class GameEngine {
         if (Math.abs(food.velocityX) < 0.1) food.velocityX = 0;
         if (Math.abs(food.velocityY) < 0.1) food.velocityY = 0;
         
-        // Granice mapy
+        // Granice mapy - jedzenie nie wychodzi poza mapę
         food.x = Math.max(0, Math.min(this.mapSize, food.x));
         food.y = Math.max(0, Math.min(this.mapSize, food.y));
       }
@@ -330,9 +335,9 @@ class GameEngine {
       };
     }
     
-    // Obszar widoczny dla gracza - zmniejszony z uwzględnieniem rozmiaru gracza
-    const baseViewRadius = 300; // Zmniejszone z 500
-    const viewRadius = baseViewRadius + player.radius * 1.5; // Perspektywa skaluje się z rozmiarem
+    // Obszar widoczny dla gracza - dostosowany do wielkości ekranu
+    const baseViewRadius = 400; // Zwiększone z 150 na 400
+    const viewRadius = baseViewRadius + player.radius * 3; // Większy współczynnik skalowania
     
     // Filtruj obiekty w zasięgu wzroku
     const visiblePlayers = Array.from(this.players.values())

@@ -44,6 +44,7 @@ const activeRooms = new Map();
 const playerSockets = new Map(); // playerAddress -> socketId
 const socketPlayers = new Map(); // socketId -> { playerAddress, roomId }
 const endedGames = new Set(); // Set do śledzenia zakończonych gier
+const pendingPlayers = new Map(); // playerAddress -> { roomId, socketId } - gracze czekający na nick
 
 // API Routes
 app.get('/api/rooms', (req, res) => {
@@ -216,10 +217,10 @@ app.post('/api/rooms/:id/start', async (req, res) => {
     // Utwórz instancję gry
     const game = new GameEngine(roomId, room.mapSize);
     
-    // Dodaj wszystkich graczy
-    for (const playerAddress of room.players) {
-      game.addPlayer(playerAddress);
-    }
+    // NIE DODAWAJ graczy automatycznie - czekaj aż się połączą z nickami
+    // for (const playerAddress of room.players) {
+    //   game.addPlayer(playerAddress);
+    // }
     
     // Rozpocznij grę
     game.start();
@@ -378,17 +379,39 @@ io.on('connection', (socket) => {
       return;
     }
     
+    // Zapisz gracza jako oczekującego na nick
+    pendingPlayers.set(playerAddress, { roomId, socketId: socket.id });
+    
     // Zapisz mapowanie
     playerSockets.set(playerAddress, socket.id);
     socketPlayers.set(socket.id, { playerAddress, roomId });
     
-    // Dołącz do pokoju
+    // Dołącz do pokoju Socket.IO
     socket.join(roomId);
     
-    // Dodaj gracza do gry jeśli go nie ma
-    game.addPlayer(playerAddress);
+    // NIE DODAWAJ gracza do gry jeszcze!
+    console.log(`Player ${playerAddress} connected to game ${roomId} (waiting for nickname)`);
+  });
+  
+  socket.on('set_nickname', ({ roomId, playerAddress, nickname }) => {
+    const game = games.get(roomId);
+    if (!game) return;
     
-    console.log(`Player ${playerAddress} joined game ${roomId}`);
+    // Sprawdź czy gracz jest w pendingPlayers
+    const pendingInfo = pendingPlayers.get(playerAddress);
+    if (!pendingInfo || pendingInfo.roomId !== roomId) {
+      console.log(`Player ${playerAddress} not in pending list for room ${roomId}`);
+      return;
+    }
+    
+    // Teraz dodaj gracza do gry z nickiem
+    const player = game.addPlayer(playerAddress, nickname);
+    if (player) {
+      console.log(`Player ${playerAddress} joined game ${roomId} with nickname: ${nickname}`);
+      
+      // Usuń z pending
+      pendingPlayers.delete(playerAddress);
+    }
   });
   
   socket.on('player_input', (data) => {
@@ -397,18 +420,12 @@ io.on('connection', (socket) => {
     const game = games.get(roomId);
     if (!game) return;
     
-    game.updatePlayer(playerAddress, input);
-  });
-  
-  socket.on('set_nickname', ({ roomId, playerAddress, nickname }) => {
-    const game = games.get(roomId);
-    if (!game) return;
-    
-    const player = game.players.get(playerAddress);
-    if (player) {
-      player.nickname = nickname;
-      console.log(`Player ${playerAddress} set nickname to: ${nickname}`);
+    // Sprawdź czy gracz jest w grze (nie w pending)
+    if (!game.players.has(playerAddress)) {
+      return;
     }
+    
+    game.updatePlayer(playerAddress, input);
   });
   
   socket.on('get_rooms', () => {
@@ -427,6 +444,7 @@ io.on('connection', (socket) => {
       // Usuń mapowania
       playerSockets.delete(playerAddress);
       socketPlayers.delete(socket.id);
+      pendingPlayers.delete(playerAddress);
       
       // Oznacz gracza jako nieaktywnego (nie usuwaj go całkowicie)
       const game = games.get(roomId);

@@ -22,6 +22,8 @@ export default function Game({ roomId, roomInfo, onBack }) {
   const [isEndingGame, setIsEndingGame] = useState(false);
   const [gameEndedOnBlockchain, setGameEndedOnBlockchain] = useState(false);
   const [nicknameTimeout, setNicknameTimeout] = useState(null);
+  const [playerJoined, setPlayerJoined] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(15);
   const endGameAttemptedRef = useRef(false);
   
   const canvasRef = useRef(null);
@@ -32,29 +34,60 @@ export default function Game({ roomId, roomInfo, onBack }) {
     eject: false
   });
   
+  // Zapobiegaj przewijaniu strony podczas gry
+  useEffect(() => {
+    // Zapisz oryginalne style
+    const originalOverflow = document.body.style.overflow;
+    const originalPosition = document.body.style.position;
+    const originalHeight = document.body.style.height;
+    
+    // Ustaw body na fixed podczas gry
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.height = '100vh';
+    document.body.style.width = '100vw';
+    
+    // Przywróć oryginalne style przy wyjściu
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.position = originalPosition;
+      document.body.style.height = originalHeight;
+      document.body.style.width = '';
+    };
+  }, []);
+  
   // Auto-start po 15 sekundach jeśli nick nie został podany
   useEffect(() => {
     if (showNicknameInput) {
-      const timeout = setTimeout(() => {
-        // Jeśli po 15 sekundach nie ma nicku, użyj adresu
-        if (!nickname) {
-          const defaultNick = publicKey.toString().substring(0, 8);
-          setNickname(defaultNick);
-          handleSetNickname(defaultNick);
-        }
-      }, 15000);
+      let seconds = 15;
+      setTimeLeft(15);
       
-      setNicknameTimeout(timeout);
+      const interval = setInterval(() => {
+        seconds--;
+        setTimeLeft(seconds);
+        
+        if (seconds <= 0) {
+          // Jeśli po 15 sekundach nie ma nicku, użyj adresu
+          if (!nickname) {
+            const defaultNick = publicKey.toString().substring(0, 8);
+            setNickname(defaultNick);
+            handleSetNickname(defaultNick);
+          }
+          clearInterval(interval);
+        }
+      }, 1000);
+      
+      setNicknameTimeout(interval);
       
       return () => {
-        if (timeout) clearTimeout(timeout);
+        if (interval) clearInterval(interval);
       };
     }
-  }, [showNicknameInput, nickname, publicKey]);
+  }, [showNicknameInput]);
   
-  // Connect to game server
+  // Connect to game server - ale NIE dołączaj do gry dopóki nie ma nicku
   useEffect(() => {
-    if (!roomId || !publicKey || showNicknameInput) return;
+    if (!roomId || !publicKey) return;
     
     const connect = async () => {
       try {
@@ -62,20 +95,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
         setSocket(io);
         setIsConnected(true);
         
-        // Join game
-        io.emit('join_game', {
-          roomId,
-          playerAddress: publicKey.toString()
-        });
-        
-        // Set nickname if we have it
-        if (nickname) {
-          io.emit('set_nickname', {
-            roomId,
-            playerAddress: publicKey.toString(),
-            nickname: nickname.trim()
-          });
-        }
+        // NIE dołączaj do gry od razu - czekaj na nick
         
         // Listen for updates
         io.on('game_state', (state) => {
@@ -159,11 +179,32 @@ export default function Game({ roomId, roomInfo, onBack }) {
         socket.disconnect();
       }
     };
-  }, [roomId, publicKey, wallet, showNicknameInput, nickname]);
+  }, [roomId, publicKey, wallet]);
+  
+  // Dołącz do gry TYLKO gdy gracz wybierze nick
+  useEffect(() => {
+    if (!socket || !isConnected || showNicknameInput || playerJoined) return;
+    
+    // Join game
+    socket.emit('join_game', {
+      roomId,
+      playerAddress: publicKey.toString()
+    });
+    
+    // Set nickname
+    socket.emit('set_nickname', {
+      roomId,
+      playerAddress: publicKey.toString(),
+      nickname: nickname.trim()
+    });
+    
+    setPlayerJoined(true);
+    console.log('Player joined game with nickname:', nickname);
+  }, [socket, isConnected, showNicknameInput, playerJoined, roomId, publicKey, nickname]);
   
   // Send player input with increased rate for smoother gameplay
   useEffect(() => {
-    if (!socket || !isConnected) return;
+    if (!socket || !isConnected || !playerJoined) return;
     
     const sendInput = () => {
       socket.emit('player_input', {
@@ -177,10 +218,10 @@ export default function Game({ roomId, roomInfo, onBack }) {
       inputRef.current.eject = false;
     };
     
-    const interval = setInterval(sendInput, 33); // 30 times per second (zwiększone z 50ms)
+    const interval = setInterval(sendInput, 33); // 30 times per second
     
     return () => clearInterval(interval);
-  }, [socket, isConnected, roomId, publicKey]);
+  }, [socket, isConnected, playerJoined, roomId, publicKey]);
   
   // Mouse handling
   const handleMouseMove = useCallback((e) => {
@@ -198,9 +239,16 @@ export default function Game({ roomId, roomInfo, onBack }) {
       const centerX = canvas.width / 2;
       const centerY = canvas.height / 2;
       
-      // Calculate position in game world
-      const worldX = playerView.player.x + (x - centerX);
-      const worldY = playerView.player.y + (y - centerY);
+      // Calculate zoom level based on player size and screen size
+      const screenSize = Math.min(canvas.width, canvas.height);
+      const baseZoom = screenSize / 800;
+      // Znacznie wolniejsze oddalanie - zmniejszone o 70%
+      const playerZoom = Math.max(0.8, Math.min(1.5, 100 / (playerView.player.radius * 0.3 + 50)));
+      const zoomLevel = baseZoom * playerZoom;
+      
+      // Calculate position in game world with zoom
+      const worldX = playerView.player.x + (x - centerX) / zoomLevel;
+      const worldY = playerView.player.y + (y - centerY) / zoomLevel;
       
       inputRef.current.mouseX = worldX;
       inputRef.current.mouseY = worldY;
@@ -322,7 +370,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
         <button onClick={() => handleSetNickname()}>Start game</button>
         <button onClick={onBack} className="back-btn">Back</button>
         <p style={{ marginTop: '20px', color: '#95A5A6', fontSize: '14px' }}>
-          Game will start automatically in {15 - Math.floor((Date.now() % 15000) / 1000)} seconds...
+          Game will start automatically in {timeLeft} seconds...
         </p>
       </div>
     );

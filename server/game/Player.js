@@ -18,7 +18,7 @@ class Player {
     // Prędkość
     this.velocityX = 0;
     this.velocityY = 0;
-    this.baseSpeed = 50; // Zwiększone z 15 na 50 (ponad 3x szybciej)
+    this.baseSpeed = 3; // Jeszcze bardziej zmniejszona prędkość
     this.isBoosting = false; // Czy gracz przyspiesza
     this.boostEndTime = 0; // Kiedy kończy się boost
     
@@ -67,12 +67,16 @@ class Player {
       const dirX = dx / distance;
       const dirY = dy / distance;
       
-      // Prędkość zależy od masy (większy = wolniejszy)
-      let speed = this.baseSpeed * (20 / (this.mass + 20));
+      // Prędkość zależy od masy, ale mniej karna niż wcześniej
+      // Używamy pierwiastka z masy zamiast liniowej zależności
+      let speed = this.baseSpeed * (30 / (Math.sqrt(this.mass) + 20));
+      
+      // Minimalna prędkość
+      speed = Math.max(speed, this.baseSpeed * 0.3);
       
       // Jeśli boost jest aktywny, znacząco zwiększ prędkość
       if (this.isBoosting) {
-        speed *= 3; // 3x szybciej podczas boosta
+        speed *= 10; // 10x szybciej podczas boosta przy bardzo niskiej bazowej prędkości
       }
       
       // Aktualizuj prędkość
@@ -83,9 +87,10 @@ class Player {
       this.x += this.velocityX * deltaTime * 60;
       this.y += this.velocityY * deltaTime * 60;
       
-      // Ograniczenia mapy
-      this.x = Math.max(this.radius, Math.min(mapSize - this.radius, this.x));
-      this.y = Math.max(this.radius, Math.min(mapSize - this.radius, this.y));
+      // Ograniczenia mapy - pozwól wychodzić na 30% wielkości gracza
+      const mapMargin = this.radius * 0.3;
+      this.x = Math.max(-mapMargin, Math.min(mapSize + mapMargin, this.x));
+      this.y = Math.max(-mapMargin, Math.min(mapSize + mapMargin, this.y));
     }
     
     // Stopniowa utrata masy (0.2% na sekundę)
@@ -121,14 +126,14 @@ class Player {
   split() {
     if (!this.canSplit()) return false;
     
-    // Zabierz 10% masy za podział/boost
+    // Zabierz 10% masy za boost
     const boostCost = this.mass * 0.1;
     this.mass -= boostCost;
     this.updateRadius();
     
-    // Aktywuj boost na 2 sekundy
+    // Aktywuj boost na 1 sekundę (zmniejszone z 2)
     this.isBoosting = true;
-    this.boostEndTime = Date.now() + 2000;
+    this.boostEndTime = Date.now() + 1000; // 1 sekunda
     
     this.lastSplitTime = Date.now();
     return true;
