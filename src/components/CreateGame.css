@@ -1,12 +1,14 @@
 /* src/components/CreateGame.css */
 .create-game {
   max-width: 500px;
-  margin: 0 auto;
+  margin: 20px auto;
   background: white;
   border: 4px solid #34495E;
   border-radius: 20px;
   padding: 40px;
   box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
+  position: relative;
+  z-index: 5;
 }
 
 .create-game h2 {
@@ -37,6 +39,9 @@
   font-weight: 700;
   margin-bottom: 8px;
   font-size: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .form-group input {
@@ -49,6 +54,8 @@
   color: #2C3E50;
   font-family: 'SF Pro Display', -apple-system, sans-serif;
   font-weight: 700;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .form-group:nth-child(1) input:focus { border-color: #E74C3C; }
@@ -67,6 +74,7 @@
   color: #7F8C8D;
   margin-top: 6px;
   font-weight: 700;
+  display: block;
 }
 
 .prize-info {
@@ -168,7 +176,7 @@
 @media (max-width: 600px) {
   .create-game {
     padding: 25px;
-    margin: 20px;
+    margin: 10px;
   }
   
   .form-actions {

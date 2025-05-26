@@ -1,28 +1,26 @@
 /* src/components/Lobby.css */
 .lobby {
   min-height: 100vh;
-  background: #F5F5F5;
-  padding: 40px 20px;
+  position: relative;
+  padding: 20px;
+  padding-top: 10px; /* Mniejszy padding górny */
 }
 
-.lobby-header {
-  text-align: center;
-  margin-bottom: 60px;
-}
-
-.lobby-header h1 {
-  font-size: 56px;
-  margin: 0;
-  color: #E74C3C;
-  font-weight: 700;
-  letter-spacing: -1px;
-}
-
-.tagline {
-  font-size: 20px;
-  margin-top: 8px;
-  color: #16A085;
-  font-weight: 700;
+/* Agar.io style grid background */
+.lobby::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: #ffffff;
+  background-image: 
+    linear-gradient(#f0f0f0 1px, transparent 1px),
+    linear-gradient(90deg, #f0f0f0 1px, transparent 1px);
+  background-size: 50px 50px;
+  z-index: -1;
+  pointer-events: none;
 }
 
 .lobby-controls {
@@ -31,11 +29,15 @@
   align-items: center;
   max-width: 1200px;
   margin: 0 auto 40px;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding-top: 20px; /* Dodany padding górny */
 }
 
 .filter-buttons {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .filter-buttons button {
@@ -49,6 +51,7 @@
   font-weight: 700;
   font-size: 14px;
   box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.1);
+  white-space: nowrap;
 }
 
 .filter-buttons button:nth-child(1) { color: #E74C3C; border-color: #E74C3C; }
@@ -83,6 +86,7 @@
   align-items: center;
   gap: 8px;
   box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
 }
 
 .create-room-btn:hover {
@@ -100,6 +104,7 @@
   gap: 25px;
   max-width: 1200px;
   margin: 0 auto;
+  padding-bottom: 40px; /* Dodany padding dolny */
 }
 
 .room-card {
@@ -256,6 +261,7 @@
   align-items: center;
   justify-content: center;
   height: 400px;
+  padding-top: 50px; /* Dodany padding górny */
 }
 
 .spinner {
@@ -281,6 +287,7 @@
 .no-rooms {
   text-align: center;
   padding: 100px 20px;
+  padding-top: 150px; /* Większy padding górny */
 }
 
 .no-rooms p:first-child {
@@ -300,19 +307,13 @@
 @media (max-width: 768px) {
   .lobby {
     padding: 20px;
-  }
-  
-  .lobby-header h1 {
-    font-size: 40px;
-  }
-  
-  .tagline {
-    font-size: 18px;
+    padding-top: 10px;
   }
   
   .lobby-controls {
     flex-direction: column;
     gap: 20px;
+    padding-top: 10px;
   }
   
   .filter-buttons {
@@ -329,5 +330,6 @@
   
   .rooms-grid {
     grid-template-columns: 1fr;
+    padding-bottom: 20px;
   }
 }

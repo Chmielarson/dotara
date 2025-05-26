@@ -13,7 +13,7 @@ class Physics {
   }
   
   // Sprawdzanie kolizji między okręgami z procentem pokrycia
-  checkCircleCollisionWithOverlap(obj1, obj2, overlapPercent = 0.5) {
+  checkCircleCollisionWithOverlap(obj1, obj2, overlapPercent = 0.8) {
     const distance = this.getDistance(obj1, obj2);
     
     // Jeśli nie ma żadnej kolizji, zwróć false
@@ -57,7 +57,7 @@ class Physics {
   }
   
   // Obliczanie prędkości na podstawie masy
-  calculateSpeed(mass, baseSpeed = 5) {
+  calculateSpeed(mass, baseSpeed = 50) {
     // Im większa masa, tym wolniejszy ruch
     return baseSpeed * (20 / (mass + 20));
   }

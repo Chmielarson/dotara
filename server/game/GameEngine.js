@@ -4,7 +4,7 @@ const Food = require('./Food');
 const Physics = require('./Physics');
 
 class GameEngine {
-  constructor(roomId, mapSize = 3000, maxFood = 500) {
+  constructor(roomId, mapSize = 3000, maxFood = 170) { // Zmniejszone z 500 na 170 (około 70% mniej)
     this.roomId = roomId;
     this.mapSize = mapSize;
     this.maxFood = maxFood;
@@ -13,7 +13,7 @@ class GameEngine {
     this.physics = new Physics();
     this.isRunning = false;
     this.lastUpdate = Date.now();
-    this.tickRate = 60; // 60 FPS
+    this.tickRate = 120; // 60 FPS
     this.gameLoop = null;
     this.leaderboard = [];
     this.winner = null;
@@ -110,9 +110,9 @@ class GameEngine {
       player.setTarget(input.mouseX, input.mouseY);
     }
     
-    // Obsługa podziału (space)
+    // Obsługa podziału (space) - teraz działa jak boost
     if (input.split && player.canSplit()) {
-      this.splitPlayer(player);
+      player.split(); // To teraz aktywuje boost
     }
     
     // Obsługa wyrzucania masy (W)
@@ -122,26 +122,7 @@ class GameEngine {
   }
   
   splitPlayer(player) {
-    if (player.mass < 35) return; // Minimalna masa do podziału
-    
-    const halfMass = player.mass / 2;
-    player.mass = halfMass;
-    player.updateRadius();
-    
-    // Stwórz nową część gracza
-    const angle = Math.atan2(player.targetY - player.y, player.targetX - player.x);
-    const distance = player.radius * 4;
-    
-    const newPart = {
-      x: player.x + Math.cos(angle) * distance,
-      y: player.y + Math.sin(angle) * distance,
-      mass: halfMass,
-      velocityX: Math.cos(angle) * 10,
-      velocityY: Math.sin(angle) * 10
-    };
-    
-    // TODO: Implementacja wieloczęściowych graczy
-    console.log('Split player:', player.address);
+    // Ta funkcja nie jest już używana - split działa jako boost
   }
   
   ejectMass(player) {
@@ -160,7 +141,7 @@ class GameEngine {
       ejectMass
     );
     
-    // Nadaj prędkość wyrzuconej masie (zwiększona 3x)
+    // Nadaj prędkość wyrzuconej masie
     food.velocityX = Math.cos(angle) * 24;
     food.velocityY = Math.sin(angle) * 24;
     
@@ -266,17 +247,17 @@ class GameEngine {
         const player1 = players[i];
         const player2 = players[j];
         
-        // Sprawdź kolizję z 50% pokryciem
-        if (this.physics.checkCircleCollisionWithOverlap(player1, player2, 0.5)) {
+        // Sprawdź kolizję z 80% pokryciem (zmienione z 50%)
+        if (this.physics.checkCircleCollisionWithOverlap(player1, player2, 0.8)) {
           // Większy gracz zjada mniejszego
           if (player1.radius > player2.radius * 1.1) {
-            console.log(`Player ${player1.address} is eating player ${player2.address} (50% overlap)`);
+            console.log(`Player ${player1.address} is eating player ${player2.address} (80% overlap)`);
             player1.eat(player2.mass);
             player2.die();
             this.eliminatedPlayers.add(player2.address);
             playersToRemove.push(player2.address);
           } else if (player2.radius > player1.radius * 1.1) {
-            console.log(`Player ${player2.address} is eating player ${player1.address} (50% overlap)`);
+            console.log(`Player ${player2.address} is eating player ${player1.address} (80% overlap)`);
             player2.eat(player1.mass);
             player1.die();
             this.eliminatedPlayers.add(player1.address);
@@ -349,8 +330,9 @@ class GameEngine {
       };
     }
     
-    // Obszar widoczny dla gracza
-    const viewRadius = 500 + player.radius * 2;
+    // Obszar widoczny dla gracza - zmniejszony z uwzględnieniem rozmiaru gracza
+    const baseViewRadius = 300; // Zmniejszone z 500
+    const viewRadius = baseViewRadius + player.radius * 1.5; // Perspektywa skaluje się z rozmiarem
     
     // Filtruj obiekty w zasięgu wzroku
     const visiblePlayers = Array.from(this.players.values())
@@ -363,7 +345,8 @@ class GameEngine {
         radius: p.radius,
         color: p.color,
         nickname: p.nickname,
-        isMe: p.address === playerAddress
+        isMe: p.address === playerAddress,
+        isBoosting: p.isBoosting
       }));
     
     const visibleFood = Array.from(this.food.values())
@@ -383,7 +366,8 @@ class GameEngine {
         radius: player.radius,
         mass: player.mass,
         color: player.color,
-        isAlive: player.isAlive
+        isAlive: player.isAlive,
+        isBoosting: player.isBoosting
       },
       players: visiblePlayers,
       food: visibleFood,

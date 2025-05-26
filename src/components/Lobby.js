@@ -45,11 +45,6 @@ export default function Lobby({ onJoinRoom, onCreateRoom }) {
   
   return (
     <div className="lobby">
-      <div className="lobby-header">
-        <h1>dotara.io</h1>
-        <p className="tagline">Eat others to win crypto!</p>
-      </div>
-      
       <div className="lobby-controls">
         <div className="filter-buttons">
           <button 

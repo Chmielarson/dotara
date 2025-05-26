@@ -153,7 +153,24 @@
   align-items: center;
   justify-content: center;
   height: 100vh;
-  background: #F5F5F5;
+  position: relative;
+}
+
+/* Agar.io style grid background for nickname screen */
+.nickname-screen::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: #ffffff;
+  background-image: 
+    linear-gradient(#f0f0f0 1px, transparent 1px),
+    linear-gradient(90deg, #f0f0f0 1px, transparent 1px);
+  background-size: 50px 50px;
+  z-index: -1;
+  pointer-events: none;
 }
 
 .nickname-screen h2 {

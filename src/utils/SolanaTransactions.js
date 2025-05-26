@@ -134,33 +134,61 @@ export function getRoomsUpdates(callback) {
   return () => socket.off('rooms_update');
 }
 
+// Zmień funkcję createRoom w src/utils/SolanaTransactions.js
+
 export async function createRoom(maxPlayers, entryFee, mapSize, gameDuration, wallet) {
   const { publicKey, signTransaction } = wallet;
   
   if (!publicKey) throw new Error('Wallet not connected');
   
-  // Znajdź wolny slot
+  // Znajdź wolny slot - zwiększamy limit do 50 (maksimum w smart kontrakcie)
   let roomSlot = 0;
   let gamePDA = null;
   
-  for (let slot = 0; slot < 10; slot++) {
-    const [pda] = await findGamePDA(publicKey, slot);
+  // Sprawdzamy losowe sloty zamiast sekwencyjnie
+  const maxAttempts = 50;
+  let attempts = 0;
+  
+  while (attempts < maxAttempts) {
+    // Losowy slot od 0 do 49
+    roomSlot = Math.floor(Math.random() * 50);
+    const [pda] = await findGamePDA(publicKey, roomSlot);
     
     try {
       const accountInfo = await connection.getAccountInfo(pda);
       if (!accountInfo) {
-        roomSlot = slot;
         gamePDA = pda;
         break;
       }
     } catch {
-      roomSlot = slot;
       gamePDA = pda;
       break;
     }
+    
+    attempts++;
   }
   
-  if (!gamePDA) throw new Error('All room slots are occupied');
+  // Jeśli nie znaleziono losowo, szukaj sekwencyjnie
+  if (!gamePDA) {
+    for (let slot = 0; slot < 50; slot++) {
+      const [pda] = await findGamePDA(publicKey, slot);
+      
+      try {
+        const accountInfo = await connection.getAccountInfo(pda);
+        if (!accountInfo) {
+          roomSlot = slot;
+          gamePDA = pda;
+          break;
+        }
+      } catch {
+        roomSlot = slot;
+        gamePDA = pda;
+        break;
+      }
+    }
+  }
+  
+  if (!gamePDA) throw new Error('All room slots are occupied. Please try again later or cancel an existing room.');
   
   console.log('Creating room:', {
     roomSlot,
@@ -206,7 +234,7 @@ export async function createRoom(maxPlayers, entryFee, mapSize, gameDuration, wa
   console.log('Transaction confirmed');
   
   // Zarejestruj na serwerze
-  const response = await fetch('http://localhost:3001/api/rooms', {
+  const response = await fetch(`${GAME_SERVER_URL}/api/rooms`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -453,6 +481,87 @@ export async function claimPrize(roomId, wallet) {
 export function connectToGameServer(roomId, playerAddress) {
   const socket = initializeSocket();
   return socket;
+}
+
+// Dodaj tę funkcję do src/utils/SolanaTransactions.js
+
+function serializeCancelRoomData() {
+  const buffer = Buffer.alloc(1);
+  buffer.writeUInt8(6, 0); // CancelRoom instruction
+  return buffer;
+}
+
+export async function cancelRoom(roomId, wallet) {
+  const { publicKey, signTransaction } = wallet;
+  
+  if (!publicKey) throw new Error('Wallet not connected');
+  
+  // Pobierz dane pokoju
+  const response = await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch room data');
+  }
+  const roomData = await response.json();
+  
+  // Sprawdź czy użytkownik jest twórcą
+  if (roomData.creatorAddress !== publicKey.toString()) {
+    throw new Error('Only room creator can cancel the room');
+  }
+  
+  // Sprawdź czy gra nie została rozpoczęta
+  if (roomData.gameStarted) {
+    throw new Error('Cannot cancel room after game has started');
+  }
+  
+  const roomPDA = new PublicKey(roomData.roomAddress);
+  const data = serializeCancelRoomData();
+  
+  // Przygotuj konta dla wszystkich graczy którym trzeba zwrócić środki
+  const keys = [
+    { pubkey: publicKey, isSigner: true, isWritable: true },
+    { pubkey: roomPDA, isSigner: false, isWritable: true },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ];
+  
+  // Dodaj konta pozostałych graczy (jeśli są)
+  for (let i = 1; i < roomData.players.length; i++) {
+    keys.push({
+      pubkey: new PublicKey(roomData.players[i]),
+      isSigner: false,
+      isWritable: true
+    });
+  }
+  
+  const instruction = new TransactionInstruction({
+    keys,
+    programId: PROGRAM_ID,
+    data: data
+  });
+  
+  const transaction = new Transaction().add(instruction);
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+  transaction.recentBlockhash = blockhash;
+  transaction.feePayer = publicKey;
+  
+  const signedTransaction = await signTransaction(transaction);
+  const signature = await connection.sendRawTransaction(signedTransaction.serialize());
+  
+  await connection.confirmTransaction({
+    blockhash,
+    lastValidBlockHeight,
+    signature
+  }, 'confirmed');
+  
+  // Powiadom serwer o anulowaniu
+  await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      transactionSignature: signature
+    })
+  });
+  
+  return { success: true, signature };
 }
 
 export { socket };

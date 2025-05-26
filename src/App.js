@@ -9,10 +9,14 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import Lobby from './components/Lobby';
 import CreateGame from './components/CreateGame';
 import Game from './components/Game';
-import { joinRoom, startGame, getRoomsUpdates } from './utils/SolanaTransactions';
+import { joinRoom, startGame, getRoomsUpdates, cancelRoom } from './utils/SolanaTransactions';
 import './App.css';
 import '@solana/wallet-adapter-react-ui/styles.css';
 import io from 'socket.io-client';
+
+// Import logo - zmień ścieżkę jeśli logo jest w innym miejscu
+// Jeśli logo jest w public: '/logo.png'
+// Jeśli logo jest w src/assets: import logo from './assets/logo.png';
 
 const network = WalletAdapterNetwork.Devnet;
 const endpoint = clusterApiUrl(network);
@@ -99,9 +103,17 @@ function AppContent() {
       }
     };
     
+    const handleRoomCancelled = (data) => {
+      if (data.roomId === currentRoomId) {
+        alert('Room has been cancelled by the creator');
+        handleBack();
+      }
+    };
+    
     // Listen for updates
     socket.on('rooms_update', handleRoomsUpdate);
     socket.on('game_started', handleGameStarted);
+    socket.on('room_cancelled', handleRoomCancelled);
     
     // Request updates
     socket.emit('get_rooms');
@@ -109,6 +121,7 @@ function AppContent() {
     return () => {
       socket.off('rooms_update', handleRoomsUpdate);
       socket.off('game_started', handleGameStarted);
+      socket.off('room_cancelled', handleRoomCancelled);
     };
   }, [socket, currentRoomId, currentView]);
   
@@ -229,6 +242,42 @@ function AppContent() {
     }
   };
   
+  const handleCancelRoom = async () => {
+    if (!currentRoomId || !currentRoomInfo) return;
+    
+    // Sprawdź czy użytkownik jest twórcą pokoju
+    if (currentRoomInfo.players[0] !== publicKey.toString()) {
+      alert('Only room creator can cancel the room');
+      return;
+    }
+    
+    // Sprawdź czy gra już się rozpoczęła
+    if (currentRoomInfo.gameStarted) {
+      alert('Cannot cancel room - game already started');
+      return;
+    }
+    
+    try {
+      const confirmCancel = window.confirm(
+        'Are you sure you want to cancel this room?\n' +
+        'All players will be refunded their entry fees.'
+      );
+      
+      if (!confirmCancel) return;
+      
+      // Wywołaj funkcję anulowania pokoju
+      await cancelRoom(currentRoomId, wallet);
+      
+      alert('Room cancelled successfully. Funds have been returned.');
+      
+      // Wróć do lobby
+      handleBack();
+    } catch (error) {
+      console.error('Error cancelling room:', error);
+      alert(`Error cancelling room: ${error.message}`);
+    }
+  };
+  
   const handleBack = () => {
     setCurrentView('lobby');
     setCurrentRoomId(null);
@@ -240,8 +289,8 @@ function AppContent() {
     <div className="app">
       <header className="app-header">
         <div className="header-content">
-          <h1>Dotara.io</h1>
-          <p>Blockchain Battle Royale</p>
+          {/* Tutaj tylko logo bez napisu Blockchain Battle Royale */}
+          <img src="/logo.png" alt="Dotara.io" className="logo" />
         </div>
         <div className="wallet-section">
           <WalletMultiButton />
@@ -293,6 +342,14 @@ function AppContent() {
              currentRoomInfo.players[0] === publicKey?.toString() && (
               <button className="start-game-btn" onClick={handleStartGame}>
                 Start game
+              </button>
+            )}
+            
+            {/* Przycisk anulowania - tylko dla twórcy pokoju gdy jest sam */}
+            {currentRoomInfo.players.length === 1 && 
+             currentRoomInfo.players[0] === publicKey?.toString() && (
+              <button className="cancel-room-btn" onClick={handleCancelRoom}>
+                Cancel room
               </button>
             )}
             

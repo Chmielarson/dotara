@@ -21,6 +21,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
   const [isClaiming, setIsClaiming] = useState(false);
   const [isEndingGame, setIsEndingGame] = useState(false);
   const [gameEndedOnBlockchain, setGameEndedOnBlockchain] = useState(false);
+  const [nicknameTimeout, setNicknameTimeout] = useState(null);
   const endGameAttemptedRef = useRef(false);
   
   const canvasRef = useRef(null);
@@ -31,9 +32,29 @@ export default function Game({ roomId, roomInfo, onBack }) {
     eject: false
   });
   
+  // Auto-start po 15 sekundach jeśli nick nie został podany
+  useEffect(() => {
+    if (showNicknameInput) {
+      const timeout = setTimeout(() => {
+        // Jeśli po 15 sekundach nie ma nicku, użyj adresu
+        if (!nickname) {
+          const defaultNick = publicKey.toString().substring(0, 8);
+          setNickname(defaultNick);
+          handleSetNickname(defaultNick);
+        }
+      }, 15000);
+      
+      setNicknameTimeout(timeout);
+      
+      return () => {
+        if (timeout) clearTimeout(timeout);
+      };
+    }
+  }, [showNicknameInput, nickname, publicKey]);
+  
   // Connect to game server
   useEffect(() => {
-    if (!roomId || !publicKey) return;
+    if (!roomId || !publicKey || showNicknameInput) return;
     
     const connect = async () => {
       try {
@@ -46,6 +67,15 @@ export default function Game({ roomId, roomInfo, onBack }) {
           roomId,
           playerAddress: publicKey.toString()
         });
+        
+        // Set nickname if we have it
+        if (nickname) {
+          io.emit('set_nickname', {
+            roomId,
+            playerAddress: publicKey.toString(),
+            nickname: nickname.trim()
+          });
+        }
         
         // Listen for updates
         io.on('game_state', (state) => {
@@ -129,9 +159,9 @@ export default function Game({ roomId, roomInfo, onBack }) {
         socket.disconnect();
       }
     };
-  }, [roomId, publicKey, wallet]);
+  }, [roomId, publicKey, wallet, showNicknameInput, nickname]);
   
-  // Send player input
+  // Send player input with increased rate for smoother gameplay
   useEffect(() => {
     if (!socket || !isConnected) return;
     
@@ -147,7 +177,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
       inputRef.current.eject = false;
     };
     
-    const interval = setInterval(sendInput, 50); // 20 times per second
+    const interval = setInterval(sendInput, 33); // 30 times per second (zwiększone z 50ms)
     
     return () => clearInterval(interval);
   }, [socket, isConnected, roomId, publicKey]);
@@ -198,14 +228,20 @@ export default function Game({ roomId, roomInfo, onBack }) {
   }, []);
   
   // Set nickname
-  const handleSetNickname = () => {
-    if (!nickname.trim() || !socket) return;
+  const handleSetNickname = (customNick = null) => {
+    const finalNick = customNick || nickname.trim();
     
-    socket.emit('set_nickname', {
-      roomId,
-      playerAddress: publicKey.toString(),
-      nickname: nickname.trim()
-    });
+    if (!finalNick) {
+      // Jeśli nie ma nicku, użyj początku adresu
+      const defaultNick = publicKey.toString().substring(0, 8);
+      setNickname(defaultNick);
+    }
+    
+    // Wyczyść timeout jeśli istnieje
+    if (nicknameTimeout) {
+      clearTimeout(nicknameTimeout);
+      setNicknameTimeout(null);
+    }
     
     setShowNicknameInput(false);
   };
@@ -283,8 +319,11 @@ export default function Game({ roomId, roomInfo, onBack }) {
           onKeyPress={(e) => e.key === 'Enter' && handleSetNickname()}
           autoFocus
         />
-        <button onClick={handleSetNickname}>Start game</button>
+        <button onClick={() => handleSetNickname()}>Start game</button>
         <button onClick={onBack} className="back-btn">Back</button>
+        <p style={{ marginTop: '20px', color: '#95A5A6', fontSize: '14px' }}>
+          Game will start automatically in {15 - Math.floor((Date.now() % 15000) / 1000)} seconds...
+        </p>
       </div>
     );
   }
@@ -339,7 +378,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
             <kbd>Mouse</kbd> - Move
           </div>
           <div className="control-item">
-            <kbd>Space</kbd> - Split
+            <kbd>Space</kbd> - Boost (-10% mass)
           </div>
           <div className="control-item">
             <kbd>W</kbd> - Eject mass

@@ -502,7 +502,7 @@ function broadcastGameState() {
 }
 
 // Broadcast co 50ms (20 FPS dla klientów)
-setInterval(broadcastGameState, 50);
+setInterval(broadcastGameState, 16);
 
 // Funkcja kończąca grę po czasie
 async function endGameByTimeout(roomId) {
@@ -568,6 +568,122 @@ setInterval(() => {
     console.log(`Auto-cleaned ${cleaned} inactive rooms`);
   }
 }, 30 * 60 * 1000); // 30 minut
+
+// Dodaj ten endpoint do server/index.js (po innych endpointach API)
+
+app.post('/api/rooms/:id/cancel', async (req, res) => {
+  try {
+    const roomId = req.params.id;
+    const { transactionSignature } = req.body;
+    
+    console.log(`Cancelling room ${roomId}`);
+    
+    const room = activeRooms.get(roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    
+    if (room.gameStarted) {
+      return res.status(400).json({ error: 'Cannot cancel - game already started' });
+    }
+    
+    // Oznacz pokój jako anulowany
+    room.isActive = false;
+    room.cancelled = true;
+    room.cancelledAt = new Date().toISOString();
+    room.cancelTransactionSignature = transactionSignature;
+    
+    // Usuń grę jeśli istnieje
+    const game = games.get(roomId);
+    if (game) {
+      game.stop();
+      games.delete(roomId);
+    }
+    
+    // Usuń pokój z aktywnych
+    activeRooms.delete(roomId);
+    
+    // Powiadom wszystkich o aktualizacji
+    io.emit('rooms_update', Array.from(activeRooms.values()));
+    
+    // Powiadom graczy w pokoju
+    io.to(roomId).emit('room_cancelled', { roomId });
+    
+    console.log(`Room ${roomId} cancelled successfully`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error cancelling room:', error);
+    res.status(500).json({ error: 'Failed to cancel room' });
+  }
+});
+
+// Dodaj tę funkcję do server/index.js
+
+// Funkcja do sprawdzania i czyszczenia starych pokoi na blockchainie
+async function cleanupOldRoomsOnChain() {
+  try {
+    console.log('Starting blockchain rooms cleanup...');
+    
+    // Pobierz wszystkie aktywne pokoje
+    const activeRoomAddresses = new Set(
+      Array.from(activeRooms.values()).map(room => room.roomAddress)
+    );
+    
+    // Sprawdź pokoje na blockchainie dla różnych użytkowników
+    // To wymaga listy adresów użytkowników - można to rozbudować
+    // Na razie pomijamy automatyczne czyszczenie blockchain
+    
+    console.log('Blockchain cleanup check completed');
+  } catch (error) {
+    console.error('Error cleaning up blockchain rooms:', error);
+  }
+}
+
+// Zmień automatyczne czyszczenie aby było bardziej agresywne
+setInterval(() => {
+  const now = Date.now();
+  const fifteenMinutesAgo = now - (15 * 60 * 1000); // 15 minut
+  let cleaned = 0;
+  
+  for (const [roomId, room] of activeRooms) {
+    const roomAge = now - new Date(room.createdAt).getTime();
+    
+    // Usuń pokoje które:
+    // - Zostały utworzone ponad 15 minut temu i nie rozpoczęły się
+    // - LUB mają zwycięzcę (gra się zakończyła)
+    // - LUB zostały anulowane
+    if ((roomAge > fifteenMinutesAgo && !room.gameStarted && room.players.length === 1) || 
+        room.winner || 
+        room.cancelled) {
+      activeRooms.delete(roomId);
+      
+      // Usuń też grę jeśli istnieje
+      const game = games.get(roomId);
+      if (game) {
+        game.stop();
+        games.delete(roomId);
+      }
+      
+      cleaned++;
+    }
+  }
+  
+  if (cleaned > 0) {
+    console.log(`Auto-cleaned ${cleaned} inactive rooms`);
+    io.emit('rooms_update', Array.from(activeRooms.values()));
+  }
+}, 5 * 60 * 1000); // Co 5 minut
+
+// Dodaj też czyszczenie przy starcie serwera
+setTimeout(() => {
+  console.log('Initial cleanup of old rooms...');
+  const cleaned = activeRooms.size;
+  activeRooms.clear();
+  games.clear();
+  if (cleaned > 0) {
+    console.log(`Cleaned ${cleaned} rooms on startup`);
+  }
+}, 1000);
 
 // Start server
 const PORT = process.env.PORT || 3001;

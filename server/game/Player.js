@@ -18,7 +18,9 @@ class Player {
     // Prędkość
     this.velocityX = 0;
     this.velocityY = 0;
-    this.baseSpeed = 15; // Zwiększone z 5 na 15 (3x szybciej)
+    this.baseSpeed = 50; // Zwiększone z 15 na 50 (ponad 3x szybciej)
+    this.isBoosting = false; // Czy gracz przyspiesza
+    this.boostEndTime = 0; // Kiedy kończy się boost
     
     // Ograniczenia
     this.lastSplitTime = 0;
@@ -50,6 +52,11 @@ class Player {
   update(deltaTime, mapSize) {
     if (!this.isAlive) return;
     
+    // Sprawdź czy boost się skończył
+    if (this.isBoosting && Date.now() > this.boostEndTime) {
+      this.isBoosting = false;
+    }
+    
     // Oblicz kierunek do celu
     const dx = this.targetX - this.x;
     const dy = this.targetY - this.y;
@@ -61,7 +68,12 @@ class Player {
       const dirY = dy / distance;
       
       // Prędkość zależy od masy (większy = wolniejszy)
-      const speed = this.baseSpeed * (20 / (this.mass + 20));
+      let speed = this.baseSpeed * (20 / (this.mass + 20));
+      
+      // Jeśli boost jest aktywny, znacząco zwiększ prędkość
+      if (this.isBoosting) {
+        speed *= 3; // 3x szybciej podczas boosta
+      }
       
       // Aktualizuj prędkość
       this.velocityX = dirX * speed;
@@ -93,7 +105,8 @@ class Player {
     const now = Date.now();
     return (
       this.mass >= 35 && 
-      now - this.lastSplitTime > this.splitCooldown
+      now - this.lastSplitTime > this.splitCooldown &&
+      !this.isBoosting // Nie można dzielić się podczas boosta
     );
   }
   
@@ -107,6 +120,15 @@ class Player {
   
   split() {
     if (!this.canSplit()) return false;
+    
+    // Zabierz 10% masy za podział/boost
+    const boostCost = this.mass * 0.1;
+    this.mass -= boostCost;
+    this.updateRadius();
+    
+    // Aktywuj boost na 2 sekundy
+    this.isBoosting = true;
+    this.boostEndTime = Date.now() + 2000;
     
     this.lastSplitTime = Date.now();
     return true;
@@ -133,7 +155,8 @@ class Player {
       radius: this.radius,
       color: this.color,
       isAlive: this.isAlive,
-      score: this.score
+      score: this.score,
+      isBoosting: this.isBoosting
     };
   }
 }

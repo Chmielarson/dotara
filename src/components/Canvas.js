@@ -50,8 +50,24 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
     
     gridPatternRef.current = createGridPattern();
     
+    // Funkcja do przyciemniania koloru
+    const darkenColor = (color, percent) => {
+      // Jeśli kolor jest w formacie hsl
+      if (color.startsWith('hsl')) {
+        const match = color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+        if (match) {
+          const h = parseInt(match[1]);
+          const s = parseInt(match[2]);
+          const l = Math.max(0, parseInt(match[3]) - percent);
+          return `hsl(${h}, ${s}%, ${l}%)`;
+        }
+      }
+      // Fallback
+      return color;
+    };
+    
     // Funkcja renderowania
-    const render = () => {
+    const render = (timestamp) => {
       // Białe tło
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -142,14 +158,15 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
         ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
         ctx.fill();
         
-        // Obramowanie
+        // Obramowanie - przyciemniony kolor gracza
+        const borderColor = darkenColor(p.color, 20); // 2 odcienie ciemniejszy
         if (inDanger) {
           // Czerwone migające obramowanie gdy gracz jest w niebezpieczeństwie
           ctx.strokeStyle = '#FF0000';
           ctx.lineWidth = 5;
           ctx.setLineDash([10, 5]);
         } else {
-          ctx.strokeStyle = p.isMe ? '#FFD700' : '#000000';
+          ctx.strokeStyle = borderColor;
           ctx.lineWidth = p.isMe ? 3 : 2;
           ctx.setLineDash([]);
         }
@@ -159,17 +176,24 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
         
-        // Nazwa gracza
-        ctx.fillStyle = '#000000';
+        // Nazwa gracza - biała
+        ctx.fillStyle = '#FFFFFF';
         ctx.font = `${Math.max(12, p.radius / 4)}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.lineWidth = 3;
+        ctx.strokeText(p.nickname || 'Player', p.x, p.y);
         ctx.fillText(p.nickname || 'Player', p.x, p.y);
         
-        // Masa gracza (mniejsza czcionka)
+        // Masa gracza (mniejsza czcionka) - też biała
         ctx.font = `${Math.max(10, p.radius / 6)}px Arial`;
-        ctx.fillStyle = '#666666';
-        ctx.fillText(Math.floor(p.radius * p.radius / 25), p.x, p.y + p.radius / 3);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.lineWidth = 2;
+        const massText = Math.floor(p.radius * p.radius / 25);
+        ctx.strokeText(massText, p.x, p.y + p.radius / 3);
+        ctx.fillText(massText, p.x, p.y + p.radius / 3);
       });
       
       // Przywróć stan kontekstu
