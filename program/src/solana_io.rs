@@ -282,7 +282,7 @@ fn process_create_room(
         return Err(ProgramError::InvalidArgument);
     }
     
-    if room_slot >= 10 {
+    if room_slot >= 50 {
         return Err(ProgramError::InvalidArgument);
     }
     
