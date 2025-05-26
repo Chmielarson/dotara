@@ -1,6 +1,6 @@
 {
-  "short_name": "Solana.io",
-  "name": "Solana.io - Blockchain Battle Royale",
+  "short_name": "Dotara.io",
+  "name": "Dotara.io - Blockchain Battle Royale",
   "icons": [
     {
       "src": "favicon.ico",
@@ -20,8 +20,8 @@
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#764ba2",
-  "background_color": "#667eea",
+  "theme_color": "#4CAF50",
+  "background_color": "#ffffff",
   "orientation": "landscape",
   "categories": ["games", "entertainment"],
   "description": "A blockchain-based battle royale game on Solana. Eat others to grow and win crypto rewards!"

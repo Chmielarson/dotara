@@ -29,28 +29,28 @@ export default function CreateGame({ onBack, onRoomCreated }) {
   
   const handleSubmit = async () => {
     if (!publicKey) {
-      setError('Połącz portfel, aby stworzyć pokój');
+      setError('Connect wallet to create a room');
       return;
     }
     
-    // Walidacja
+    // Validation
     if (formData.maxPlayers < 2 || formData.maxPlayers > 20) {
-      setError('Liczba graczy musi być między 2 a 20');
+      setError('Number of players must be between 2 and 20');
       return;
     }
     
     if (formData.entryFee < 0.01 || formData.entryFee > 10) {
-      setError('Wpisowe musi być między 0.01 a 10 SOL');
+      setError('Entry fee must be between 0.01 and 10 SOL');
       return;
     }
     
     if (formData.mapSize < 1000 || formData.mapSize > 10000) {
-      setError('Rozmiar mapy musi być między 1000 a 10000');
+      setError('Map size must be between 1000 and 10000');
       return;
     }
     
     if (formData.gameDuration < 5 || formData.gameDuration > 60) {
-      setError('Czas gry musi być między 5 a 60 minut');
+      setError('Game time must be between 5 and 60 minutes');
       return;
     }
     
@@ -69,7 +69,7 @@ export default function CreateGame({ onBack, onRoomCreated }) {
       onRoomCreated(roomId);
     } catch (error) {
       console.error('Error creating room:', error);
-      setError(`Błąd tworzenia pokoju: ${error.message}`);
+      setError(`Error creating room: ${error.message}`);
     } finally {
       setIsCreating(false);
     }
@@ -86,12 +86,12 @@ export default function CreateGame({ onBack, onRoomCreated }) {
   
   return (
     <div className="create-game">
-      <h2>Stwórz nową grę</h2>
+      <h2>Create new game</h2>
       
       <div className="form-container">
         <div className="form-group">
           <label>
-            Maksymalna liczba graczy
+            Maximum players
             <input
               type="number"
               name="maxPlayers"
@@ -101,13 +101,13 @@ export default function CreateGame({ onBack, onRoomCreated }) {
               max="20"
               required
             />
-            <span className="hint">Od 2 do 20 graczy</span>
+            <span className="hint">From 2 to 20 players</span>
           </label>
         </div>
         
         <div className="form-group">
           <label>
-            Wpisowe (SOL)
+            Entry fee (SOL)
             <input
               type="number"
               name="entryFee"
@@ -118,13 +118,13 @@ export default function CreateGame({ onBack, onRoomCreated }) {
               step="0.01"
               required
             />
-            <span className="hint">Od 0.01 do 10 SOL</span>
+            <span className="hint">From 0.01 to 10 SOL</span>
           </label>
         </div>
         
         <div className="form-group">
           <label>
-            Rozmiar mapy
+            Map size
             <input
               type="number"
               name="mapSize"
@@ -135,13 +135,13 @@ export default function CreateGame({ onBack, onRoomCreated }) {
               step="500"
               required
             />
-            <span className="hint">Od 1000 do 10000 jednostek</span>
+            <span className="hint">From 1000 to 10000 units</span>
           </label>
         </div>
         
         <div className="form-group">
           <label>
-            Czas gry (minuty)
+            Game time (minutes)
             <input
               type="number"
               name="gameDuration"
@@ -151,22 +151,22 @@ export default function CreateGame({ onBack, onRoomCreated }) {
               max="60"
               required
             />
-            <span className="hint">Od 5 do 60 minut</span>
+            <span className="hint">From 5 to 60 minutes</span>
           </label>
         </div>
         
         <div className="prize-info">
-          <h3>Informacje o nagrodzie</h3>
+          <h3>Prize information</h3>
           <div className="prize-row">
-            <span>Całkowita pula:</span>
+            <span>Total pool:</span>
             <span>{prize.total.toFixed(2)} SOL</span>
           </div>
           <div className="prize-row">
-            <span>Prowizja platformy (5%):</span>
+            <span>Platform fee (5%):</span>
             <span>{prize.platformFee.toFixed(2)} SOL</span>
           </div>
           <div className="prize-row highlight">
-            <span>Nagroda dla zwycięzcy:</span>
+            <span>Winner prize:</span>
             <span>{prize.winnerPrize.toFixed(2)} SOL</span>
           </div>
         </div>
@@ -179,10 +179,10 @@ export default function CreateGame({ onBack, onRoomCreated }) {
         
         <div className="form-actions">
           <button type="button" onClick={onBack} className="cancel-btn">
-            Anuluj
+            Cancel
           </button>
           <button onClick={handleSubmit} disabled={isCreating} className="submit-btn">
-            {isCreating ? 'Tworzenie...' : 'Stwórz pokój'}
+            {isCreating ? 'Creating...' : 'Create room'}
           </button>
         </div>
       </div>

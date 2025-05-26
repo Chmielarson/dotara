@@ -29,6 +29,11 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       patternCanvas.width = gridSize;
       patternCanvas.height = gridSize;
       
+      // Białe tło
+      patternCtx.fillStyle = '#ffffff';
+      patternCtx.fillRect(0, 0, gridSize, gridSize);
+      
+      // Czarna kratka
       patternCtx.strokeStyle = '#f0f0f0';
       patternCtx.lineWidth = 1;
       
@@ -47,7 +52,9 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
     
     // Funkcja renderowania
     const render = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Białe tło
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
       
       if (!playerView || !playerView.player) {
         animationRef.current = requestAnimationFrame(render);
@@ -79,7 +86,7 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       
       // Rysuj granice mapy
       if (gameState?.mapSize) {
-        ctx.strokeStyle = '#ff0000';
+        ctx.strokeStyle = '#333333';
         ctx.lineWidth = 5;
         ctx.strokeRect(0, 0, gameState.mapSize, gameState.mapSize);
       }
@@ -183,12 +190,12 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       const minimapX = canvas.width - minimapSize - minimapPadding;
       const minimapY = canvas.height - minimapSize - minimapPadding;
       
-      // Tło minimapy
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      // Tło minimapy - białe z czarnym obramowaniem
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
       ctx.fillRect(minimapX, minimapY, minimapSize, minimapSize);
       
       // Obramowanie
-      ctx.strokeStyle = '#ffffff';
+      ctx.strokeStyle = '#000000';
       ctx.lineWidth = 2;
       ctx.strokeRect(minimapX, minimapY, minimapSize, minimapSize);
       
@@ -197,15 +204,15 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       const playerMinimapX = minimapX + player.x * scale;
       const playerMinimapY = minimapY + player.y * scale;
       
-      // Gracz na minimapie
-      ctx.fillStyle = '#FFD700';
+      // Gracz na minimapie - czarny punkt
+      ctx.fillStyle = '#000000';
       ctx.beginPath();
       ctx.arc(playerMinimapX, playerMinimapY, 3, 0, Math.PI * 2);
       ctx.fill();
       
       // Obszar widoczny
       const viewSize = 1000 * scale; // Przybliżony obszar widoczny
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
       ctx.lineWidth = 1;
       ctx.strokeRect(
         playerMinimapX - viewSize / 2,

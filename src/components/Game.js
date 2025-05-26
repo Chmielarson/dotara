@@ -31,7 +31,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
     eject: false
   });
   
-  // Połączenie z serwerem gry
+  // Connect to game server
   useEffect(() => {
     if (!roomId || !publicKey) return;
     
@@ -41,13 +41,13 @@ export default function Game({ roomId, roomInfo, onBack }) {
         setSocket(io);
         setIsConnected(true);
         
-        // Dołącz do gry
+        // Join game
         io.emit('join_game', {
           roomId,
           playerAddress: publicKey.toString()
         });
         
-        // Nasłuchuj na aktualizacje
+        // Listen for updates
         io.on('game_state', (state) => {
           setGameState(state);
         });
@@ -58,7 +58,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
         
         io.on('player_eliminated', (data) => {
           if (data.playerAddress === publicKey.toString()) {
-            // Gracz został wyeliminowany
+            // Player was eliminated
             setPlayerView(prev => ({
               ...prev,
               player: { ...prev?.player, isAlive: false }
@@ -71,13 +71,13 @@ export default function Game({ roomId, roomInfo, onBack }) {
           setIsGameEnded(true);
           setWinner(data.winner);
           
-          // Jeśli gra została zakończona na blockchainie, oznacz to
+          // If game was ended on blockchain, mark it
           if (data.blockchainConfirmed) {
             setGameEndedOnBlockchain(true);
             endGameAttemptedRef.current = true;
           }
           
-          // Jeśli wygrałeś i transakcja nie została jeszcze wysłana
+          // If you won and transaction wasn't sent yet
           if (data.winner === publicKey.toString() && 
               !data.blockchainConfirmed && 
               !isEndingGame && 
@@ -98,14 +98,14 @@ export default function Game({ roomId, roomInfo, onBack }) {
                 setGameEndedOnBlockchain(true);
               }
             } catch (error) {
-              // Sprawdź czy błąd oznacza, że gra już została zakończona
+              // Check if error means game was already ended
               if (error.message && (error.message.includes('invalid account data') || 
                   error.message.includes('already been processed'))) {
                 console.log('Game already ended on blockchain');
                 setGameEndedOnBlockchain(true);
               } else {
                 console.error('Error ending game on blockchain:', error);
-                // W przypadku błędu, zresetuj flagę aby można było spróbować ponownie
+                // On error, reset flag to allow retry
                 endGameAttemptedRef.current = false;
               }
             } finally {
@@ -129,9 +129,9 @@ export default function Game({ roomId, roomInfo, onBack }) {
         socket.disconnect();
       }
     };
-  }, [roomId, publicKey, wallet]);  // Usunięte isEndingGame i gameEndedOnBlockchain z dependencies
+  }, [roomId, publicKey, wallet]);
   
-  // Wysyłanie inputu gracza
+  // Send player input
   useEffect(() => {
     if (!socket || !isConnected) return;
     
@@ -142,17 +142,17 @@ export default function Game({ roomId, roomInfo, onBack }) {
         input: inputRef.current
       });
       
-      // Reset jednorazowych akcji
+      // Reset one-time actions
       inputRef.current.split = false;
       inputRef.current.eject = false;
     };
     
-    const interval = setInterval(sendInput, 50); // 20 razy na sekundę
+    const interval = setInterval(sendInput, 50); // 20 times per second
     
     return () => clearInterval(interval);
   }, [socket, isConnected, roomId, publicKey]);
   
-  // Obsługa myszy
+  // Mouse handling
   const handleMouseMove = useCallback((e) => {
     if (!canvasRef.current) return;
     
@@ -162,13 +162,13 @@ export default function Game({ roomId, roomInfo, onBack }) {
     
     setMousePosition({ x, y });
     
-    // Konwertuj na współrzędne świata gry
+    // Convert to game world coordinates
     if (playerView && playerView.player) {
       const canvas = canvasRef.current;
       const centerX = canvas.width / 2;
       const centerY = canvas.height / 2;
       
-      // Oblicz pozycję w świecie gry
+      // Calculate position in game world
       const worldX = playerView.player.x + (x - centerX);
       const worldY = playerView.player.y + (y - centerY);
       
@@ -177,7 +177,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
     }
   }, [playerView]);
   
-  // Obsługa klawiatury
+  // Keyboard handling
   useEffect(() => {
     const handleKeyDown = (e) => {
       switch(e.key) {
@@ -197,7 +197,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
   
-  // Ustawienie nicku
+  // Set nickname
   const handleSetNickname = () => {
     if (!nickname.trim() || !socket) return;
     
@@ -210,7 +210,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
     setShowNicknameInput(false);
   };
   
-  // Odebranie nagrody
+  // Claim prize
   const handleClaimPrize = async () => {
     if (!winner || winner !== publicKey.toString() || isClaiming) return;
     
@@ -219,40 +219,40 @@ export default function Game({ roomId, roomInfo, onBack }) {
       const result = await claimPrize(roomId, wallet);
       
       alert(
-        `🎉 Gratulacje!\n\n` +
-        `💰 Całkowita pula: ${result.totalPrize.toFixed(2)} SOL\n` +
-        `🏆 Twoja nagroda (95%): ${result.prize.toFixed(2)} SOL\n` +
-        `🏛️ Prowizja platformy (5%): ${result.platformFee.toFixed(2)} SOL\n\n` +
-        `Nagroda została przesłana do Twojego portfela!`
+        `🎉 Congratulations!\n\n` +
+        `💰 Total pool: ${result.totalPrize.toFixed(2)} SOL\n` +
+        `🏆 Your prize (95%): ${result.prize.toFixed(2)} SOL\n` +
+        `🏛️ Platform fee (5%): ${result.platformFee.toFixed(2)} SOL\n\n` +
+        `Prize has been sent to your wallet!`
       );
       
       onBack();
     } catch (error) {
       console.error('Error claiming prize:', error);
-      alert(`Błąd podczas odbierania nagrody: ${error.message}`);
+      alert(`Error claiming prize: ${error.message}`);
     } finally {
       setIsClaiming(false);
     }
   };
   
-  // Formatowanie czasu
+  // Format time
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
   
-  // Oblicz pozostały czas gry
+  // Calculate remaining game time
   const calculateRemainingTime = () => {
     if (!roomInfo.gameStartedAt || !roomInfo.gameDuration) return null;
     
     const startTime = new Date(roomInfo.gameStartedAt).getTime();
-    const duration = roomInfo.gameDuration * 60 * 1000; // minuty na ms
+    const duration = roomInfo.gameDuration * 60 * 1000; // minutes to ms
     const endTime = startTime + duration;
     const now = Date.now();
     
     const remaining = Math.max(0, endTime - now);
-    return Math.floor(remaining / 1000); // sekundy
+    return Math.floor(remaining / 1000); // seconds
   };
   
   const [remainingTime, setRemainingTime] = useState(null);
@@ -263,7 +263,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
       setRemainingTime(time);
       
       if (time === 0 && !isGameEnded) {
-        // Gra powinna się zakończyć
+        // Game should end
       }
     }, 1000);
     
@@ -273,18 +273,18 @@ export default function Game({ roomId, roomInfo, onBack }) {
   if (showNicknameInput) {
     return (
       <div className="nickname-screen">
-        <h2>Wybierz swoją nazwę</h2>
+        <h2>Choose your name</h2>
         <input
           type="text"
-          placeholder="Wpisz nick..."
+          placeholder="Enter nickname..."
           value={nickname}
           onChange={(e) => setNickname(e.target.value)}
           maxLength={20}
           onKeyPress={(e) => e.key === 'Enter' && handleSetNickname()}
           autoFocus
         />
-        <button onClick={handleSetNickname}>Rozpocznij grę</button>
-        <button onClick={onBack} className="back-btn">Wróć</button>
+        <button onClick={handleSetNickname}>Start game</button>
+        <button onClick={onBack} className="back-btn">Back</button>
       </div>
     );
   }
@@ -295,7 +295,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
       <div className="game-ui">
         {/* Leaderboard */}
         <div className="leaderboard">
-          <h3>Ranking</h3>
+          <h3>Leaderboard</h3>
           {gameState?.leaderboard?.map((player, index) => (
             <div key={player.address} className="leaderboard-item">
               <span className="rank">{player.rank}.</span>
@@ -305,14 +305,14 @@ export default function Game({ roomId, roomInfo, onBack }) {
           ))}
         </div>
         
-        {/* Informacje o grze */}
+        {/* Game info */}
         <div className="game-info">
           <div className="info-item">
-            <span>Gracze:</span>
+            <span>Players:</span>
             <span>{gameState?.playerCount || 0}</span>
           </div>
           <div className="info-item">
-            <span>Pozostały czas:</span>
+            <span>Time left:</span>
             <span className="timer">
               {remainingTime !== null ? formatTime(remainingTime) : '--:--'}
             </span>
@@ -320,11 +320,11 @@ export default function Game({ roomId, roomInfo, onBack }) {
           {playerView?.player && (
             <>
               <div className="info-item">
-                <span>Masa:</span>
+                <span>Mass:</span>
                 <span>{Math.floor(playerView.player.mass)}</span>
               </div>
               <div className="info-item">
-                <span>Pozycja:</span>
+                <span>Position:</span>
                 <span>
                   {Math.floor(playerView.player.x)}, {Math.floor(playerView.player.y)}
                 </span>
@@ -333,73 +333,73 @@ export default function Game({ roomId, roomInfo, onBack }) {
           )}
         </div>
         
-        {/* Kontrolki */}
+        {/* Controls */}
         <div className="controls">
           <div className="control-item">
-            <kbd>Mysz</kbd> - Ruch
+            <kbd>Mouse</kbd> - Move
           </div>
           <div className="control-item">
-            <kbd>Spacja</kbd> - Podział
+            <kbd>Space</kbd> - Split
           </div>
           <div className="control-item">
-            <kbd>W</kbd> - Wyrzuć masę
+            <kbd>W</kbd> - Eject mass
           </div>
         </div>
       </div>
       
-      {/* Canvas gry */}
+      {/* Game canvas */}
       <Canvas
         ref={canvasRef}
         playerView={playerView}
         onMouseMove={handleMouseMove}
       />
       
-      {/* Ekran eliminacji (dla zjedzonego gracza) */}
+      {/* Elimination screen (for eaten player) */}
       {playerView && !playerView.player.isAlive && !isGameEnded && (
         <div className="game-over-overlay">
           <div className="game-over-content">
-            <h1>Zostałeś zjedzony!</h1>
-            <p>Możesz obserwować resztę gry lub wrócić do lobby.</p>
+            <h1>You were eaten!</h1>
+            <p>You can watch the rest of the game or return to lobby.</p>
             
             <div className="spectator-info">
-              <h3>Pozostali gracze: {gameState?.playerCount || 0}</h3>
+              <h3>Players remaining: {gameState?.playerCount || 0}</h3>
             </div>
             
             <button onClick={onBack} className="back-btn">
-              Wróć do lobby
+              Back to lobby
             </button>
           </div>
         </div>
       )}
       
-      {/* Ekran końca gry */}
+      {/* Game end screen */}
       {isGameEnded && (
         <div className="game-over-overlay">
           <div className="game-over-content">
-            <h1>Gra zakończona!</h1>
+            <h1>Game Over!</h1>
             {winner === publicKey?.toString() ? (
               <>
-                <h2 className="winner-text">🎉 Wygrałeś! 🎉</h2>
-                <p>Gratulacje! Jesteś ostatnim ocalałym.</p>
+                <h2 className="winner-text">🎉 You won! 🎉</h2>
+                <p>Congratulations! You are the last survivor.</p>
                 <button 
                   className="claim-btn"
                   onClick={handleClaimPrize}
                   disabled={isClaiming}
                 >
-                  {isClaiming ? 'Odbieranie...' : 'Odbierz nagrodę'}
+                  {isClaiming ? 'Claiming...' : 'Claim prize'}
                 </button>
               </>
             ) : (
               <>
-                <h2>Przegrałeś</h2>
-                <p>Zwycięzca: {winner?.substring(0, 8)}...</p>
-                <button onClick={onBack}>Wróć do lobby</button>
+                <h2>You lost</h2>
+                <p>Winner: {winner?.substring(0, 8)}...</p>
+                <button onClick={onBack}>Back to lobby</button>
               </>
             )}
             
-            {/* Końcowy ranking */}
+            {/* Final leaderboard */}
             <div className="final-leaderboard">
-              <h3>Końcowy ranking</h3>
+              <h3>Final ranking</h3>
               {gameState?.leaderboard?.map((player, index) => (
                 <div key={player.address} className="leaderboard-item">
                   <span className="rank">{player.rank}.</span>
@@ -412,10 +412,10 @@ export default function Game({ roomId, roomInfo, onBack }) {
         </div>
       )}
       
-      {/* Przycisk wyjścia */}
+      {/* Exit button */}
       {!isGameEnded && (
         <button className="exit-btn" onClick={onBack}>
-          Opuść grę
+          Leave game
         </button>
       )}
     </div>

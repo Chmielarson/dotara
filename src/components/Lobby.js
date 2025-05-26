@@ -9,7 +9,7 @@ export default function Lobby({ onJoinRoom, onCreateRoom }) {
   const [filter, setFilter] = useState('all'); // all, waiting, inprogress
   
   useEffect(() => {
-    // Pobierz początkową listę pokoi
+    // Get initial room list
     const fetchRooms = async () => {
       try {
         const roomsData = await getRooms();
@@ -23,7 +23,7 @@ export default function Lobby({ onJoinRoom, onCreateRoom }) {
     
     fetchRooms();
     
-    // Nasłuchuj na aktualizacje
+    // Listen for updates
     const unsubscribe = getRoomsUpdates((updatedRooms) => {
       setRooms(updatedRooms);
     });
@@ -46,8 +46,8 @@ export default function Lobby({ onJoinRoom, onCreateRoom }) {
   return (
     <div className="lobby">
       <div className="lobby-header">
-        <h1>Solana.io</h1>
-        <p className="tagline">Zjedz innych, aby wygrać krypto!</p>
+        <h1>dotara.io</h1>
+        <p className="tagline">Eat others to win crypto!</p>
       </div>
       
       <div className="lobby-controls">
@@ -56,74 +56,74 @@ export default function Lobby({ onJoinRoom, onCreateRoom }) {
             className={filter === 'all' ? 'active' : ''}
             onClick={() => setFilter('all')}
           >
-            Wszystkie ({rooms.length})
+            All ({rooms.length})
           </button>
           <button 
             className={filter === 'waiting' ? 'active' : ''}
             onClick={() => setFilter('waiting')}
           >
-            Oczekujące ({rooms.filter(r => !r.gameStarted).length})
+            Waiting ({rooms.filter(r => !r.gameStarted).length})
           </button>
           <button 
             className={filter === 'inprogress' ? 'active' : ''}
             onClick={() => setFilter('inprogress')}
           >
-            W toku ({rooms.filter(r => r.gameStarted).length})
+            In progress ({rooms.filter(r => r.gameStarted).length})
           </button>
         </div>
         
         <button className="create-room-btn" onClick={onCreateRoom}>
           <span className="icon">+</span>
-          Stwórz nową grę
+          Create new game
         </button>
       </div>
       
       {isLoading ? (
         <div className="loading">
           <div className="spinner"></div>
-          <p>Ładowanie pokoi...</p>
+          <p>Loading rooms...</p>
         </div>
       ) : filteredRooms.length === 0 ? (
         <div className="no-rooms">
-          <p>Brak dostępnych pokoi</p>
-          <p>Stwórz pierwszą grę!</p>
+          <p>No rooms available</p>
+          <p>Create the first game!</p>
         </div>
       ) : (
         <div className="rooms-grid">
           {filteredRooms.map(room => (
             <div key={room.id} className={`room-card ${room.gameStarted ? 'in-progress' : ''}`}>
               <div className="room-header">
-                <h3>Pokój #{room.id.substring(room.id.length - 8)}</h3>
+                <h3>Room #{room.id.substring(room.id.length - 8)}</h3>
                 <span className={`status ${room.gameStarted ? 'started' : 'waiting'}`}>
-                  {room.gameStarted ? 'W grze' : 'Oczekuje'}
+                  {room.gameStarted ? 'In game' : 'Waiting'}
                 </span>
               </div>
               
               <div className="room-info">
                 <div className="info-row">
-                  <span className="label">Gracze:</span>
+                  <span className="label">Players:</span>
                   <span className="value">{room.currentPlayers}/{room.maxPlayers}</span>
                 </div>
                 <div className="info-row">
-                  <span className="label">Wpisowe:</span>
+                  <span className="label">Entry fee:</span>
                   <span className="value">{formatSOL(room.entryFee)} SOL</span>
                 </div>
                 <div className="info-row">
-                  <span className="label">Pula:</span>
+                  <span className="label">Prize pool:</span>
                   <span className="value highlight">{formatSOL(room.entryFee * room.currentPlayers)} SOL</span>
                 </div>
                 <div className="info-row">
-                  <span className="label">Mapa:</span>
+                  <span className="label">Map:</span>
                   <span className="value">{room.mapSize}x{room.mapSize}</span>
                 </div>
                 <div className="info-row">
-                  <span className="label">Czas gry:</span>
+                  <span className="label">Game time:</span>
                   <span className="value">{room.gameDuration} min</span>
                 </div>
               </div>
               
               <div className="room-players">
-                <p className="players-label">Gracze w pokoju:</p>
+                <p className="players-label">Players in room:</p>
                 <div className="players-list">
                   {room.players.map((player, index) => (
                     <div key={player} className="player-chip">
@@ -139,9 +139,9 @@ export default function Lobby({ onJoinRoom, onCreateRoom }) {
                 onClick={() => onJoinRoom(room.id)}
                 disabled={room.gameStarted || room.currentPlayers >= room.maxPlayers}
               >
-                {room.gameStarted ? 'Gra w toku' : 
-                 room.currentPlayers >= room.maxPlayers ? 'Pełny' : 
-                 'Dołącz'}
+                {room.gameStarted ? 'Game in progress' : 
+                 room.currentPlayers >= room.maxPlayers ? 'Full' : 
+                 'Join'}
               </button>
             </div>
           ))}

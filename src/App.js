@@ -27,7 +27,7 @@ function AppContent() {
   const [currentRoomInfo, setCurrentRoomInfo] = useState(null);
   const [socket, setSocket] = useState(null);
   
-  // Inicjalizacja socket.io
+  // Initialize socket.io
   useEffect(() => {
     const GAME_SERVER_URL = process.env.REACT_APP_GAME_SERVER_URL || 'http://localhost:3001';
     const newSocket = io(GAME_SERVER_URL, {
@@ -43,13 +43,13 @@ function AppContent() {
     };
   }, []);
   
-  // Sprawdź czy użytkownik był w grze przed odświeżeniem
+  // Check if user was in game before refresh
   useEffect(() => {
-    const savedRoom = localStorage.getItem('solana_io_current_room');
+    const savedRoom = localStorage.getItem('dotara_io_current_room');
     if (savedRoom && publicKey) {
       const { roomId, roomInfo } = JSON.parse(savedRoom);
       
-      // Sprawdź czy użytkownik jest w pokoju
+      // Check if user is in room
       if (roomInfo.players.includes(publicKey.toString())) {
         setCurrentRoomId(roomId);
         setCurrentRoomInfo(roomInfo);
@@ -60,25 +60,25 @@ function AppContent() {
           setCurrentView('waiting');
         }
       } else {
-        // Użytkownik nie jest w pokoju, wyczyść localStorage
-        localStorage.removeItem('solana_io_current_room');
+        // User not in room, clear localStorage
+        localStorage.removeItem('dotara_io_current_room');
       }
     }
   }, [publicKey]);
   
-  // Zapisz stan gry
+  // Save game state
   useEffect(() => {
     if (currentRoomId && currentRoomInfo && (currentView === 'game' || currentView === 'waiting')) {
-      localStorage.setItem('solana_io_current_room', JSON.stringify({
+      localStorage.setItem('dotara_io_current_room', JSON.stringify({
         roomId: currentRoomId,
         roomInfo: currentRoomInfo
       }));
     } else {
-      localStorage.removeItem('solana_io_current_room');
+      localStorage.removeItem('dotara_io_current_room');
     }
   }, [currentRoomId, currentRoomInfo, currentView]);
   
-  // Nasłuchuj na aktualizacje pokoju
+  // Listen for room updates
   useEffect(() => {
     if (!socket || !currentRoomId || currentView !== 'waiting') return;
     
@@ -87,23 +87,23 @@ function AppContent() {
       if (updatedRoom) {
         setCurrentRoomInfo({
           ...updatedRoom,
-          currentPlayers: updatedRoom.players.length // Dodaj currentPlayers dla kompatybilności
+          currentPlayers: updatedRoom.players.length
         });
       }
     };
     
     const handleGameStarted = (data) => {
       if (data.roomId === currentRoomId) {
-        // Gra została rozpoczęta
+        // Game started
         setCurrentView('game');
       }
     };
     
-    // Nasłuchuj na aktualizacje
+    // Listen for updates
     socket.on('rooms_update', handleRoomsUpdate);
     socket.on('game_started', handleGameStarted);
     
-    // Poproś o aktualizacje
+    // Request updates
     socket.emit('get_rooms');
     
     return () => {
@@ -112,7 +112,7 @@ function AppContent() {
     };
   }, [socket, currentRoomId, currentView]);
   
-  // Okresowe odświeżanie danych pokoju
+  // Periodic room info refresh
   useEffect(() => {
     if (!currentRoomId || currentView !== 'waiting') return;
     
@@ -126,7 +126,7 @@ function AppContent() {
             currentPlayers: roomInfo.players.length
           });
           
-          // Jeśli gra się rozpoczęła, przejdź do widoku gry
+          // If game started, go to game view
           if (roomInfo.gameStarted) {
             setCurrentView('game');
           }
@@ -136,10 +136,10 @@ function AppContent() {
       }
     };
     
-    // Pobierz dane natychmiast
+    // Fetch immediately
     fetchRoomInfo();
     
-    // Następnie co 2 sekundy
+    // Then every 2 seconds
     const interval = setInterval(fetchRoomInfo, 2000);
     
     return () => clearInterval(interval);
@@ -147,12 +147,12 @@ function AppContent() {
   
   const handleJoinRoom = async (roomId) => {
     if (!publicKey) {
-      alert('Połącz portfel, aby dołączyć do gry');
+      alert('Connect wallet to join the game');
       return;
     }
     
     try {
-      // Pobierz informacje o pokoju
+      // Get room info
       const response = await fetch(`${process.env.REACT_APP_GAME_SERVER_URL || 'http://localhost:3001'}/api/rooms/${roomId}`);
       const roomInfo = await response.json();
       
@@ -162,19 +162,19 @@ function AppContent() {
         currentPlayers: roomInfo.players.length
       });
       
-      // Sprawdź czy gracz jest już w pokoju
+      // Check if player is already in room
       if (roomInfo.players.includes(publicKey.toString())) {
-        // Gracz już jest w pokoju
+        // Player already in room
         if (roomInfo.gameStarted) {
           setCurrentView('game');
         } else {
           setCurrentView('waiting');
         }
       } else {
-        // Dołącz do pokoju
+        // Join room
         await joinRoom(roomId, roomInfo.entryFee, wallet);
         
-        // Odśwież informacje o pokoju
+        // Refresh room info
         const updatedResponse = await fetch(`${process.env.REACT_APP_GAME_SERVER_URL || 'http://localhost:3001'}/api/rooms/${roomId}`);
         const updatedRoomInfo = await updatedResponse.json();
         setCurrentRoomInfo({
@@ -186,13 +186,13 @@ function AppContent() {
       }
     } catch (error) {
       console.error('Error joining room:', error);
-      alert(`Błąd dołączania do pokoju: ${error.message}`);
+      alert(`Error joining room: ${error.message}`);
     }
   };
   
   const handleCreateRoom = () => {
     if (!publicKey) {
-      alert('Połącz portfel, aby stworzyć pokój');
+      alert('Connect wallet to create a room');
       return;
     }
     setCurrentView('create');
@@ -200,7 +200,7 @@ function AppContent() {
   
   const handleRoomCreated = async (roomId) => {
     try {
-      // Pobierz informacje o utworzonym pokoju
+      // Get created room info
       const response = await fetch(`${process.env.REACT_APP_GAME_SERVER_URL || 'http://localhost:3001'}/api/rooms/${roomId}`);
       const roomInfo = await response.json();
       
@@ -221,11 +221,11 @@ function AppContent() {
     try {
       await startGame(currentRoomId, wallet);
       
-      // Nie czekaj na odświeżenie, przejdź od razu do gry
+      // Don't wait for refresh, go straight to game
       setCurrentView('game');
     } catch (error) {
       console.error('Error starting game:', error);
-      alert(`Błąd rozpoczynania gry: ${error.message}`);
+      alert(`Error starting game: ${error.message}`);
     }
   };
   
@@ -233,21 +233,21 @@ function AppContent() {
     setCurrentView('lobby');
     setCurrentRoomId(null);
     setCurrentRoomInfo(null);
-    localStorage.removeItem('solana_io_current_room');
+    localStorage.removeItem('dotara_io_current_room');
   };
   
   return (
     <div className="app">
       <header className="app-header">
         <div className="header-content">
-          <h1>Solana.io</h1>
+          <h1>Dotara.io</h1>
           <p>Blockchain Battle Royale</p>
         </div>
         <div className="wallet-section">
           <WalletMultiButton />
           {publicKey && (
             <div className="wallet-info">
-              <span className="balance">Połączono</span>
+              <span className="balance">Connected</span>
             </div>
           )}
         </div>
@@ -270,21 +270,21 @@ function AppContent() {
         
         {currentView === 'waiting' && currentRoomInfo && (
           <div className="waiting-room">
-            <h2>Oczekiwanie na graczy</h2>
+            <h2>Waiting for players</h2>
             <div className="room-details">
-              <p>ID Pokoju: {currentRoomId}</p>
-              <p>Gracze: {currentRoomInfo.currentPlayers || currentRoomInfo.players.length}/{currentRoomInfo.maxPlayers}</p>
-              <p>Wpisowe: {currentRoomInfo.entryFee} SOL</p>
-              <p>Pula: {currentRoomInfo.entryFee * (currentRoomInfo.currentPlayers || currentRoomInfo.players.length)} SOL</p>
+              <p>Room ID: {currentRoomId}</p>
+              <p>Players: {currentRoomInfo.currentPlayers || currentRoomInfo.players.length}/{currentRoomInfo.maxPlayers}</p>
+              <p>Entry fee: {currentRoomInfo.entryFee} SOL</p>
+              <p>Prize pool: {currentRoomInfo.entryFee * (currentRoomInfo.currentPlayers || currentRoomInfo.players.length)} SOL</p>
             </div>
             
             <div className="players-waiting">
-              <h3>Gracze w pokoju:</h3>
+              <h3>Players in room:</h3>
               {currentRoomInfo.players.map((player, index) => (
                 <div key={player} className="player-waiting">
                   {player.substring(0, 8)}...{player.substring(player.length - 8)}
                   {index === 0 && ' 👑'}
-                  {player === publicKey?.toString() && ' (Ty)'}
+                  {player === publicKey?.toString() && ' (You)'}
                 </div>
               ))}
             </div>
@@ -292,12 +292,12 @@ function AppContent() {
             {currentRoomInfo.players.length >= 2 && 
              currentRoomInfo.players[0] === publicKey?.toString() && (
               <button className="start-game-btn" onClick={handleStartGame}>
-                Rozpocznij grę
+                Start game
               </button>
             )}
             
             <button className="back-btn" onClick={handleBack}>
-              Wróć do lobby
+              Back to lobby
             </button>
           </div>
         )}
