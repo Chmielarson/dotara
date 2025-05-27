@@ -9,15 +9,6 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   const wallet = useWallet();
   const { publicKey } = wallet;
   
-  // Dodaj logi na początku
-  console.log('Game component mounted with:', {
-    initialStake,
-    nickname,
-    socket: socket ? 'Socket exists' : 'No socket',
-    socketConnected: socket?.connected,
-    publicKey: publicKey?.toString()
-  });
-  
   const [gameState, setGameState] = useState(null);
   const [playerView, setPlayerView] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -27,16 +18,16 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   const [isCashingOut, setIsCashingOut] = useState(false);
   const [showCashOutModal, setShowCashOutModal] = useState(false);
   const [playerJoined, setPlayerJoined] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('Initializing...'); // Ten useState brakowało!
+  const [connectionStatus, setConnectionStatus] = useState('Initializing...');
   
   const canvasRef = useRef(null);
+  const mouseInitialized = useRef(false);
   const inputRef = useRef({
     mouseX: 0,
     mouseY: 0,
     split: false,
     eject: false
   });
-  const mouseInitialized = useRef(false);
   
   // Initialize mouse position when player data is received
   useEffect(() => {
@@ -112,22 +103,14 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     });
     
     socket.on('player_view', (view) => {
-      // Log tylko co sekundę żeby nie zaśmiecać konsoli
-      if (Date.now() % 1000 < 50) {
-        console.log('Received player_view:', {
-          hasPlayer: !!view?.player,
-          playerAlive: view?.player?.isAlive,
-          playerPos: view?.player ? `${Math.floor(view.player.x)}, ${Math.floor(view.player.y)}` : 'N/A',
-          foodCount: view?.food?.length,
-          playersCount: view?.players?.length
-        });
-        
-        // Sprawdź strukturę danych graczy
-        if (view?.players && view.players.length > 0) {
-          console.log('First player data:', view.players[0]);
-          console.log('My player in players array:', view.players.find(p => p.isMe));
-        }
-      }
+      // Log zawsze żeby zobaczyć czy otrzymujesz dane
+      console.log('Received player_view:', {
+        timestamp: Date.now(),
+        hasPlayer: !!view?.player,
+        playerPos: view?.player ? `${Math.floor(view.player.x)}, ${Math.floor(view.player.y)}` : 'N/A',
+        foodCount: view?.food?.length,
+        playersCount: view?.players?.length
+      });
       
       setPlayerView(view);
       setConnectionStatus('In game');
@@ -329,6 +312,11 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
       element: canvasRef.current 
     });
   }, []);
+  
+  // Debug connection status
+  useEffect(() => {
+    console.log('Connection status:', connectionStatus);
+  }, [connectionStatus]);
   
   return (
     <div className="game-container">

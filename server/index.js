@@ -195,7 +195,9 @@ io.on('connection', (socket) => {
     console.log('Player added to game:', {
       playerExists: !!player,
       isAlive: player?.isAlive,
-      position: player ? `${player.x}, ${player.y}` : 'N/A'
+      position: player ? `${player.x}, ${player.y}` : 'N/A',
+      mass: player?.mass,
+      radius: player?.radius
     });
     
     console.log('Global game state:', {
@@ -211,10 +213,16 @@ io.on('connection', (socket) => {
       player: player.toJSON()
     });
     
-    // Natychmiast wyślij widok gracza
+    // WAŻNE: Natychmiast wyślij widok gracza
     const playerView = globalGame.getPlayerView(playerAddress);
     if (playerView) {
-      console.log('Sending immediate player view to', playerAddress.substring(0, 8));
+      console.log('Sending immediate player view to', playerAddress.substring(0, 8), {
+        hasPlayer: !!playerView.player,
+        playerAlive: playerView.player?.isAlive,
+        playerPos: playerView.player ? `${playerView.player.x}, ${playerView.player.y}` : 'N/A',
+        playersCount: playerView.players?.length,
+        foodCount: playerView.food?.length
+      });
       socket.emit('player_view', playerView);
     } else {
       console.error('Could not generate player view for', playerAddress);
@@ -229,6 +237,12 @@ io.on('connection', (socket) => {
     globalGame.addPlayer(playerAddress, player.nickname, 0); // Respawn bez dodatkowej stawki
     
     console.log(`Player ${playerAddress} respawned`);
+    
+    // Natychmiast wyślij nowy widok
+    const playerView = globalGame.getPlayerView(playerAddress);
+    if (playerView) {
+      socket.emit('player_view', playerView);
+    }
   });
   
   socket.on('player_input', (data) => {
@@ -296,8 +310,8 @@ function broadcastGameState() {
   }
 }
 
-// Broadcast co 33ms (30 FPS dla klientów)
-setInterval(broadcastGameState, 33);
+// Broadcast co 16ms (60 FPS dla klientów) - tak jak w wersji pokojowej
+setInterval(broadcastGameState, 16);
 
 // Statystyki gry co minutę
 setInterval(() => {

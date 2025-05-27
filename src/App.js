@@ -104,9 +104,9 @@ function AppContent() {
           />
         )}
         
-        {currentView === 'game' && (
+        {currentView === 'game' && publicKey && (
           <Game 
-            key={`game-${publicKey?.toString()}-${playerStake}`} // Add key to prevent re-mounting
+            key={`game-${publicKey.toString()}-${playerStake}`}
             initialStake={playerStake}
             nickname={playerNickname}
             onLeaveGame={handleLeaveGame}

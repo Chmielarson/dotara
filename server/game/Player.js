@@ -76,7 +76,9 @@ class Player {
     // Debug
     if (isNaN(this.targetX) || isNaN(this.targetY)) {
       console.error(`Invalid target coordinates: x=${x} (${typeof x}), y=${y} (${typeof y})`);
-      return;
+      // Ustaw na aktualną pozycję jeśli nieprawidłowe
+      this.targetX = this.x;
+      this.targetY = this.y;
     }
   }
   
@@ -202,7 +204,7 @@ class Player {
   split() {
     if (!this.canSplit()) return false;
     
-    // Zabierz 10% masy za boost (NIE wartości SOL!)
+    // Zabierz 10% masy za boost
     const boostCost = this.mass * 0.1;
     this.mass -= boostCost;
     this.updateRadius();

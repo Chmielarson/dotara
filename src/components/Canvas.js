@@ -171,7 +171,7 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
         });
       }
       
-      // Draw all players
+      // Draw all players (use interpolated positions)
       for (const [id, p] of interpolatedPlayers.current) {
         // Draw player shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
