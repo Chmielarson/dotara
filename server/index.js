@@ -315,19 +315,77 @@ io.on('connection', (socket) => {
   socket.on('join_game', ({ playerAddress, nickname, initialStake }) => {
     console.log('Join game request:', { playerAddress, nickname, initialStake });
     
-    // Zapisz mapowanie
+    // Sprawdź czy gracz już istnieje w grze
+    const existingPlayer = globalGame.players.get(playerAddress);
+    
+    if (existingPlayer) {
+      // Gracz już istnieje - sprawdź jego stan
+      if (!existingPlayer.isAlive) {
+        // Gracz został zjedzony
+        if (initialStake === 0) {
+          // Próbuje dołączyć bez nowej stawki po śmierci
+          console.log(`Player ${playerAddress} was eaten and trying to rejoin without new stake`);
+          socket.emit('player_eliminated', {
+            playerAddress,
+            reason: 'You were eaten! Please join with a new stake to play again.'
+          });
+          return;
+        } else {
+          // Ma nową stawkę - pozwól na nową grę
+          console.log(`Player ${playerAddress} was eaten but has new stake - allowing fresh start`);
+          // Kontynuuj poniżej do utworzenia nowego gracza
+        }
+      } else {
+        // Gracz żyje
+        if (initialStake > 0) {
+          // Próbuje dołączyć z nową stawką mimo że żyje
+          console.log(`Player ${playerAddress} is already alive in game`);
+          socket.emit('error', {
+            message: 'You are already active in the game. Please cash out first.'
+          });
+          return;
+        } else {
+          // Reconnect do istniejącej sesji
+          playerSockets.set(playerAddress, socket.id);
+          socketPlayers.set(socket.id, { playerAddress, nickname });
+          socket.join('game');
+          
+          console.log(`Player ${playerAddress} reconnected to existing game session`);
+          
+          socket.emit('joined_game', {
+            success: true,
+            player: existingPlayer.toJSON()
+          });
+          return;
+        }
+      }
+    }
+    
+    // Nowy gracz lub martwy gracz z nową stawką
+    if (initialStake === 0 && !existingPlayer) {
+      // Całkiem nowy gracz musi mieć stawkę
+      console.log(`New player ${playerAddress} trying to join without stake`);
+      socket.emit('error', {
+        message: 'You must provide a stake to join the game.'
+      });
+      return;
+    }
+    
     playerSockets.set(playerAddress, socket.id);
     socketPlayers.set(socket.id, { playerAddress, nickname });
-    
-    // Dołącz do globalnej gry
     socket.join('game');
     
-    // Dodaj gracza do gry
     const player = globalGame.addPlayer(playerAddress, nickname, initialStake);
+    
+    if (!player) {
+      socket.emit('error', {
+        message: 'Failed to join game. Please try again.'
+      });
+      return;
+    }
     
     console.log(`Player ${playerAddress} (${nickname}) joined game with stake: ${initialStake}`);
     
-    // Wyślij potwierdzenie
     socket.emit('joined_game', {
       success: true,
       player: player.toJSON()
@@ -349,16 +407,50 @@ io.on('connection', (socket) => {
     globalGame.updatePlayer(playerAddress, input);
   });
   
-  socket.on('cash_out', ({ playerAddress }) => {
-    const result = globalGame.handleCashOut(playerAddress);
+  socket.on('initiate_cash_out', ({ playerAddress }) => {
+    console.log('Player initiating cash out:', playerAddress);
     
-    if (result) {
-      socket.emit('cash_out_result', result);
-      
-      // Usuń mapowania
-      playerSockets.delete(playerAddress);
-      socketPlayers.delete(socket.id);
+    const player = globalGame.players.get(playerAddress);
+    if (!player || !player.isAlive) {
+      socket.emit('cash_out_initiated', {
+        success: false,
+        error: 'Player not found or already dead'
+      });
+      return;
     }
+    
+    // Oznacz gracza jako "cashing out" - to zapobiegnie zjedzeniu
+    player.isCashingOut = true;
+    
+    // Zapisz wartość gracza przed usunięciem
+    const cashOutAmount = player.solValue;
+    
+    // Usuń gracza z gry (ale zachowaj wartość)
+    globalGame.removePlayer(playerAddress, true);
+    
+    // Usuń mapowania socketów
+    playerSockets.delete(playerAddress);
+    socketPlayers.delete(socket.id);
+    
+    console.log(`Player ${playerAddress} removed from game for cash out with ${cashOutAmount} lamports`);
+    
+    socket.emit('cash_out_initiated', {
+      success: true,
+      amount: cashOutAmount,
+      playerAddress
+    });
+  });
+  
+  socket.on('cash_out', ({ playerAddress }) => {
+    // To jest teraz tylko do potwierdzenia - gracz już został usunięty
+    console.log('Cash out confirmed for:', playerAddress);
+    
+    const result = {
+      address: playerAddress,
+      success: true
+    };
+    
+    socket.emit('cash_out_result', result);
   });
   
   socket.on('disconnect', () => {
@@ -386,13 +478,16 @@ function broadcastGameState() {
   
   // Wyślij spersonalizowany widok każdemu graczowi
   let broadcastCount = 0;
+  let offlinePlayersEaten = [];
+  
   for (const [playerAddress, socketId] of playerSockets) {
     const playerView = globalGame.getPlayerView(playerAddress);
     
     if (!playerView) {
-      // Gracz został zjedzony - wyślij event eliminacji
+      // Gracz został zjedzony
       const player = globalGame.players.get(playerAddress);
-      if (!player || !player.isAlive) {
+      if (player && !player.isAlive) {
+        // Gracz istnieje ale nie żyje - wyślij event eliminacji
         io.to(socketId).emit('player_eliminated', {
           playerAddress,
           reason: 'You were eaten by another player!'
@@ -408,13 +503,22 @@ function broadcastGameState() {
     broadcastCount++;
   }
   
+  // Sprawdź graczy którzy nie mają aktywnego połączenia ale są w grze
+  for (const [playerAddress, player] of globalGame.players) {
+    if (!player.isAlive && !playerSockets.has(playerAddress)) {
+      // Gracz był offline gdy został zjedzony
+      offlinePlayersEaten.push(playerAddress);
+    }
+  }
+  
   // Log co 5 sekund
   if (Date.now() % 5000 < 16) {
     console.log(`Broadcasting to ${broadcastCount} players, game state:`, {
       activePlayers: gameState.playerCount,
       totalPlayers: playerSockets.size,
       foodCount: gameState.foodCount,
-      zoneStats: gameState.zoneStats
+      zoneStats: gameState.zoneStats,
+      offlinePlayersEaten: offlinePlayersEaten.length
     });
   }
 }

@@ -117,6 +117,8 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
         setIsPlayerDead(true);
         setDeathReason(data.reason || 'You were eaten by another player!');
         setPlayerView(null); // Clear player view since they're out of the game
+        // Clear saved game state
+        localStorage.removeItem('dotara_io_game_state');
       }
     };
     
@@ -128,6 +130,12 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     const handleError = (error) => {
       console.error('Game error:', error);
       setConnectionStatus(`Error: ${error.message || error}`);
+      // If error is about being dead, show death screen
+      if (error.message && error.message.includes('eaten')) {
+        setIsPlayerDead(true);
+        setDeathReason(error.message);
+        localStorage.removeItem('dotara_io_game_state');
+      }
     };
     
     // Register all event listeners
@@ -239,27 +247,34 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     try {
       setIsCashingOut(true);
       
-      // Execute blockchain transaction
-      const result = await cashOut(wallet);
-      
-      // Notify server
-      socket.emit('cash_out', {
+      // Najpierw usuń gracza z gry na serwerze
+      socket.emit('initiate_cash_out', {
         playerAddress: publicKey.toString()
       });
       
-      alert(
-        `💰 Cash out successful!\n\n` +
-        `You cashed out: ${result.cashOutAmount.toFixed(4)} SOL\n` +
-        `Platform fee (5%): ${result.platformFee.toFixed(4)} SOL\n` +
-        `Total received: ${result.playerReceived.toFixed(4)} SOL`
-      );
+      // Czekaj na potwierdzenie usunięcia
+      socket.once('cash_out_initiated', async (data) => {
+        if (data.success) {
+          // Zapisz dane do cash out w localStorage
+          localStorage.setItem('dotara_io_pending_cashout', JSON.stringify({
+            playerAddress: publicKey.toString(),
+            amount: data.amount,
+            timestamp: Date.now()
+          }));
+          
+          // Przejdź do widoku cash out
+          onLeaveGame(true); // true = pending cash out
+        } else {
+          alert('Failed to initiate cash out. Please try again.');
+          setIsCashingOut(false);
+        }
+      });
       
-      onLeaveGame();
     } catch (error) {
-      console.error('Error cashing out:', error);
-      alert(`Error cashing out: ${error.message}`);
-    } finally {
+      console.error('Error initiating cash out:', error);
+      alert(`Error: ${error.message}`);
       setIsCashingOut(false);
+    } finally {
       setShowCashOutModal(false);
     }
   };
@@ -294,7 +309,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
       {/* Game UI - only show if player is alive */}
       {playerView && !isPlayerDead && (
         <div className="game-ui">
-          {/* Leaderboard */}
+          {/* TOP RIGHT - Leaderboard */}
           <div className="leaderboard">
             <h3>Leaderboard</h3>
             {gameState?.leaderboard?.map((player, index) => (
@@ -313,29 +328,27 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
             ))}
           </div>
           
-          {/* Player info */}
-          {playerView?.player && (
-            <div className="player-info">
+          {/* TOP LEFT - Game stats + Player info */}
+          {gameState && playerView?.player && (
+            <div className="game-info">
               <div className="info-item">
-                <span>Your Value:</span>
-                <span className="value sol-value">
-                  {formatSol(playerView.player.solValue)} SOL
-                </span>
-              </div>
-              <div className="info-item">
-                <span>Mass:</span>
+                <span>Your Mass:</span>
                 <span className="value">{Math.floor(playerView.player.mass)}</span>
-              </div>
-              <div className="info-item">
-                <span>Zone:</span>
-                <span className="value">{playerView.player.zoneName}</span>
               </div>
               <div className="info-item">
                 <span>Players Eaten:</span>
                 <span className="value">{playerView.player.playersEaten || 0}</span>
               </div>
+              <div className="info-item" style={{ marginTop: '10px', paddingTop: '10px', borderTop: '2px solid #ECF0F1' }}>
+                <span>Active Players:</span>
+                <span className="value">{gameState.playerCount}</span>
+              </div>
+              <div className="info-item">
+                <span>Total SOL:</span>
+                <span className="value">{gameState.totalSolDisplay} SOL</span>
+              </div>
               {playerView.player.canAdvanceToZone && (
-                <div className="info-item" style={{ color: '#16A085' }}>
+                <div className="info-item" style={{ color: '#16A085', marginTop: '10px' }}>
                   <span>Can advance to:</span>
                   <span className="value">Zone {playerView.player.canAdvanceToZone}</span>
                 </div>
@@ -343,21 +356,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
             </div>
           )}
           
-          {/* Game stats */}
-          {gameState && (
-            <div className="game-info">
-              <div className="info-item">
-                <span>Active Players:</span>
-                <span className="value">{gameState.playerCount}</span>
-              </div>
-              <div className="info-item">
-                <span>Total SOL in Game:</span>
-                <span className="value">{gameState.totalSolDisplay} SOL</span>
-              </div>
-            </div>
-          )}
-          
-          {/* Controls */}
+          {/* BOTTOM LEFT - Controls */}
           <div className="controls">
             <div className="control-item">
               <kbd>Mouse</kbd> - Move
@@ -370,16 +369,21 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
             </div>
           </div>
           
-          {/* Cash out button */}
-          {playerView?.player && playerView.player.isAlive && (
-            <button 
-              className="cash-out-btn"
-              onClick={handleCashOut}
-              disabled={isCashingOut}
-            >
-              💰 Cash Out ({formatSol(playerView.player.solValue)} SOL)
+          {/* BOTTOM CENTER - Action buttons */}
+          <div className="action-buttons">
+            {playerView?.player && playerView.player.isAlive && (
+              <button 
+                className="cash-out-btn"
+                onClick={handleCashOut}
+                disabled={isCashingOut}
+              >
+                💰 Cash Out ({formatSol(playerView.player.solValue)} SOL)
+              </button>
+            )}
+            <button className="exit-btn" onClick={onLeaveGame}>
+              Leave Game
             </button>
-          )}
+          </div>
         </div>
       )}
       
@@ -446,13 +450,6 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
             </div>
           </div>
         </div>
-      )}
-      
-      {/* Exit button - tylko jeśli gracz żyje */}
-      {playerView && !isPlayerDead && (
-        <button className="exit-btn" onClick={onLeaveGame}>
-          Leave Game
-        </button>
       )}
     </div>
   );

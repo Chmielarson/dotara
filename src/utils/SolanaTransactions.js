@@ -20,7 +20,7 @@ const GAME_SERVER_URL = 'http://localhost:3001';
 console.log('Using game server URL:', GAME_SERVER_URL);
 
 // Program ID - ZAKTUALIZUJ PO DEPLOYU!
-const PROGRAM_ID = new PublicKey('HG7rKQwr8NNkPeeEw2scXFatS7wrqQDEbH6Cr4ZUQRkw');
+const PROGRAM_ID = new PublicKey('AaPU514d1iHKzdMyNtXhHgrf6g94qTTrXDyJqWpnSqfQ');
 const PLATFORM_FEE_WALLET = new PublicKey('FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8');
 
 console.log('Solana configuration loaded:', {
@@ -215,7 +215,13 @@ export async function joinGlobalGame(stakeAmount, wallet) {
   
   // Sprawdź stan gracza przed próbą dołączenia
   const playerState = await checkPlayerState(wallet);
-  if (playerState?.isActive) {
+  
+  // Gracz może dołączyć jeśli:
+  // 1. Nie ma konta na blockchain (nowy gracz)
+  // 2. Ma konto ale nie jest aktywny (został zjedzony)
+  // 3. Ma konto, jest aktywny ale wartość = 0 (respawn po śmierci)
+  
+  if (playerState?.isActive && playerState.currentValueLamports > 0) {
     throw new Error('You are already active in the game. Please cash out first.');
   }
   
@@ -226,7 +232,9 @@ export async function joinGlobalGame(stakeAmount, wallet) {
     stakeAmount,
     gamePDA: gamePDA.toString(),
     playerStatePDA: playerStatePDA.toString(),
-    existingPlayer: playerState?.exists
+    existingPlayer: playerState?.exists,
+    isActive: playerState?.isActive,
+    currentValue: playerState?.currentValueLamports
   });
   
   const data = serializeJoinGameData(stakeAmount);

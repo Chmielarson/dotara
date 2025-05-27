@@ -125,9 +125,25 @@ class GameEngine {
     // Sprawdź czy gracz już istnieje
     let player = this.players.get(playerAddress);
     
-    if (player && player.isAlive) {
-      // Gracz już jest w grze i żyje
-      return player;
+    if (player) {
+      // Gracz już istnieje
+      if (!player.isAlive) {
+        // Gracz był zjedzony - jeśli ma nową stawkę, pozwól na nową grę
+        if (initialStake > 0) {
+          // Usuń starego martwego gracza
+          this.players.delete(playerAddress);
+          console.log(`Player ${playerAddress} was dead - removing old instance for fresh start with stake: ${initialStake}`);
+          // Kontynuuj tworzenie nowego gracza poniżej
+        } else {
+          // Gracz próbuje dołączyć bez nowej stawki po śmierci
+          console.log(`Player ${playerAddress} tried to rejoin without new stake after death - rejecting`);
+          return null;
+        }
+      } else {
+        // Gracz żyje - zwróć istniejącego gracza
+        console.log(`Player ${playerAddress} already in game and alive`);
+        return player;
+      }
     }
     
     // Określ odpowiednią strefę startową na podstawie stake
@@ -173,11 +189,12 @@ class GameEngine {
       console.log(`Player ${playerAddress} cashed out with ${player.solValue} lamports from Zone ${player.currentZone}`);
       return player;
     } else {
-      // Gracz został zjedzony - usuń go całkowicie z gry
+      // Gracz został zjedzony - oznacz jako nieaktywny ale NIE usuwaj
+      player.isAlive = false;
+      player.mass = 0;
       this.convertPlayerToFood(player);
       this.totalSolInGame -= player.solValue; // SOL został przekazany innemu graczowi
-      this.players.delete(playerAddress); // Usuń gracza całkowicie
-      console.log(`Player ${playerAddress} was eaten and removed from game`);
+      console.log(`Player ${playerAddress} was eaten and marked as dead`);
       return player;
     }
   }
@@ -369,7 +386,7 @@ class GameEngine {
   }
   
   checkCollisions() {
-    const players = Array.from(this.players.values()).filter(p => p.isAlive);
+    const players = Array.from(this.players.values()).filter(p => p.isAlive && !p.isCashingOut);
     const playersToRemove = [];
     
     // Kolizje gracz-jedzenie
@@ -396,6 +413,9 @@ class GameEngine {
       for (let j = i + 1; j < players.length; j++) {
         const player1 = players[i];
         const player2 = players[j];
+        
+        // Pomiń graczy w trakcie cash out
+        if (player1.isCashingOut || player2.isCashingOut) continue;
         
         // Sprawdź kolizję z 80% pokryciem
         if (this.physics.checkCircleCollisionWithOverlap(player1, player2, 0.8)) {
@@ -459,6 +479,7 @@ class GameEngine {
   getGameState() {
     const activePlayers = Array.from(this.players.values()).filter(p => p.isAlive);
     const totalValue = Array.from(this.players.values())
+      .filter(p => p.isAlive) // Tylko żywi gracze mają SOL
       .reduce((sum, p) => sum + p.solValue, 0);
     
     // Statystyki per strefa
@@ -485,7 +506,8 @@ class GameEngine {
       totalSolDisplay: (totalValue / 1000000000).toFixed(4),
       stats: {
         totalPlayersJoined: this.totalPlayersJoined,
-        totalPlayersCashedOut: this.totalPlayersCashedOut
+        totalPlayersCashedOut: this.totalPlayersCashedOut,
+        deadPlayers: Array.from(this.players.values()).filter(p => !p.isAlive).length
       }
     };
   }

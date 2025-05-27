@@ -273,28 +273,6 @@ export default function JoinGame({ onJoinGame, socket }) {
                 <span className="value">{gameStats.mapSize}x{gameStats.mapSize}</span>
               </div>
               
-              {gameStats.zoneStats && (
-                <div className="zone-stats">
-                  <h4>Players per Zone</h4>
-                  <div className="zone-stat-item">
-                    <span>🥉 Bronze:</span>
-                    <span>{gameStats.zoneStats[1]?.playerCount || 0}</span>
-                  </div>
-                  <div className="zone-stat-item">
-                    <span>🥈 Silver:</span>
-                    <span>{gameStats.zoneStats[2]?.playerCount || 0}</span>
-                  </div>
-                  <div className="zone-stat-item">
-                    <span>🥇 Gold:</span>
-                    <span>{gameStats.zoneStats[3]?.playerCount || 0}</span>
-                  </div>
-                  <div className="zone-stat-item">
-                    <span>💎 Diamond:</span>
-                    <span>{gameStats.zoneStats[4]?.playerCount || 0}</span>
-                  </div>
-                </div>
-              )}
-              
               {gameStats.leaderboard && gameStats.leaderboard.length > 0 && (
                 <div className="mini-leaderboard">
                   <h4>Top Players</h4>

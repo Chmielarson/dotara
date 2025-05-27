@@ -34,6 +34,7 @@ body:has(.join-game-container) {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  height: 100%;
 }
 
 .join-middle {
@@ -47,6 +48,7 @@ body:has(.join-game-container) {
 .join-right {
   width: 350px;
   flex-shrink: 0;
+  height: 100%;
 }
 
 /* Original join-content for backwards compatibility */
@@ -256,15 +258,20 @@ body:has(.join-game-container) {
   color: #34495E;
 }
 
+.how-to-play strong {
+  color: #34495E;
+}
+
 .game-stats {
   background: white;
   border: 4px solid #F39C12;
   border-radius: 20px;
   padding: 20px;
   box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
-  flex: 1;
+  height: calc(50% - 10px); /* Half height minus gap */
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .game-stats h3 {
@@ -273,6 +280,7 @@ body:has(.join-game-container) {
   font-size: 20px;
   font-weight: 700;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .game-stats .mini-leaderboard {
@@ -299,6 +307,26 @@ body:has(.join-game-container) {
 }
 
 .stat-item .value {
+  color: #2C3E50;
+  font-weight: 700;
+}
+
+.zone-stats {
+  margin-top: 16px;
+}
+
+.zone-stats h4 {
+  margin: 0 0 12px 0;
+  color: #E74C3C;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.zone-stat-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
   color: #2C3E50;
   font-weight: 700;
 }
@@ -364,6 +392,7 @@ body:has(.join-game-container) {
   justify-content: space-between;
   align-items: center;
   border-radius: 16px 16px 0 0;
+  flex-shrink: 0;
 }
 
 .chat-header h3 {
@@ -479,6 +508,7 @@ body:has(.join-game-container) {
   padding: 16px;
   background: white;
   border-top: 3px solid #ECF0F1;
+  flex-shrink: 0;
 }
 
 .chat-input {
@@ -636,7 +666,7 @@ body:has(.join-game-container) {
   .join-content-wrapper {
     flex-direction: column;
     align-items: center;
-    min-height: auto;
+    height: auto;
   }
   
   .join-left,
@@ -648,6 +678,7 @@ body:has(.join-game-container) {
   
   .join-left {
     order: 2;
+    height: auto;
   }
   
   .join-middle {
@@ -660,6 +691,10 @@ body:has(.join-game-container) {
   
   .static-chat-container {
     height: 500px;
+  }
+  
+  .game-stats {
+    height: auto;
   }
 }
 

@@ -1,4 +1,10 @@
-// src/App.js
+{currentView === 'cashout' && publicKey && pendingCashOut && (
+          <CashOutScreen
+            pendingCashOut={pendingCashOut}
+            wallet={wallet}
+            onComplete={handleCashOutComplete}
+          />
+        )}// src/App.js
 import React, { useState, useEffect, useMemo } from 'react';
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
@@ -8,6 +14,7 @@ import { clusterApiUrl } from '@solana/web3.js';
 import { useWallet } from '@solana/wallet-adapter-react';
 import JoinGame from './components/JoinGame';
 import Game from './components/Game';
+import CashOutScreen from './components/CashOutScreen';
 import './App.css';
 import '@solana/wallet-adapter-react-ui/styles.css';
 import io from 'socket.io-client';
@@ -20,9 +27,10 @@ function AppContent() {
   const wallet = useWallet();
   const { publicKey } = wallet;
   
-  const [currentView, setCurrentView] = useState('join'); // 'join' lub 'game'
+  const [currentView, setCurrentView] = useState('join'); // 'join', 'game', 'cashout'
   const [playerStake, setPlayerStake] = useState(0);
   const [playerNickname, setPlayerNickname] = useState('');
+  const [pendingCashOut, setPendingCashOut] = useState(null);
   
   // Initialize socket.io - use useMemo to prevent reconnection on every render
   const socket = useMemo(() => {
@@ -40,18 +48,19 @@ function AppContent() {
     };
   }, [socket]);
   
-  // Check if user was in game before refresh
+  // Check for pending cash out on mount
   useEffect(() => {
-    const savedGameState = localStorage.getItem('dotara_io_game_state');
-    if (savedGameState && publicKey) {
-      const { playerAddress, stake, nickname } = JSON.parse(savedGameState);
+    const pendingCashOutData = localStorage.getItem('dotara_io_pending_cashout');
+    if (pendingCashOutData && publicKey) {
+      const data = JSON.parse(pendingCashOutData);
       
-      if (playerAddress === publicKey.toString()) {
-        setPlayerStake(stake);
-        setPlayerNickname(nickname);
-        setCurrentView('game');
+      if (data.playerAddress === publicKey.toString()) {
+        // Gracz ma oczekującą wypłatę
+        setPendingCashOut(data);
+        setCurrentView('cashout');
       } else {
-        localStorage.removeItem('dotara_io_game_state');
+        // Inne konto - usuń stare dane
+        localStorage.removeItem('dotara_io_pending_cashout');
       }
     }
   }, [publicKey]);
@@ -86,11 +95,23 @@ function AppContent() {
     setCurrentView('game');
   };
   
-  const handleLeaveGame = () => {
+  const handleLeaveGame = (hasPendingCashOut = false) => {
+    if (hasPendingCashOut) {
+      setCurrentView('cashout');
+    } else {
+      setCurrentView('join');
+      setPlayerStake(0);
+      setPlayerNickname('');
+      localStorage.removeItem('dotara_io_game_state');
+    }
+  };
+  
+  const handleCashOutComplete = () => {
+    setPendingCashOut(null);
+    localStorage.removeItem('dotara_io_pending_cashout');
     setCurrentView('join');
     setPlayerStake(0);
     setPlayerNickname('');
-    localStorage.removeItem('dotara_io_game_state');
   };
   
   return (

@@ -32,6 +32,7 @@
   pointer-events: auto;
 }
 
+/* TOP RIGHT - Leaderboard */
 .leaderboard {
   position: absolute;
   top: 20px;
@@ -39,25 +40,28 @@
   background: rgba(255, 255, 255, 0.95);
   border: 3px solid #16A085;
   border-radius: 15px;
-  padding: 20px;
-  min-width: 220px;
+  padding: 15px;
+  min-width: 200px;
+  max-width: 250px;
   color: #333;
   box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.1);
 }
 
 .leaderboard h3 {
-  margin: 0 0 15px 0;
+  margin: 0 0 12px 0;
   text-align: center;
   color: #16A085;
   font-weight: 700;
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .leaderboard-item {
   display: flex;
   justify-content: space-between;
-  padding: 5px 0;
+  align-items: center;
+  padding: 4px 0;
   border-bottom: 1px solid #eee;
+  font-size: 13px;
 }
 
 .leaderboard-item:last-child {
@@ -66,7 +70,8 @@
 
 .rank {
   color: #666;
-  width: 30px;
+  width: 25px;
+  font-size: 12px;
 }
 
 .nickname {
@@ -75,6 +80,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: #333;
+  font-size: 13px;
 }
 
 .mass {
@@ -85,18 +91,21 @@
 .sol {
   color: #16A085;
   font-weight: bold;
-  min-width: 80px;
+  min-width: 70px;
   text-align: right;
+  font-size: 13px;
 }
 
 .zone-badge {
   font-weight: bold;
-  font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 8px;
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.8);
+  margin: 0 4px;
 }
 
+/* TOP LEFT - Game Stats */
 .game-info {
   position: absolute;
   top: 20px;
@@ -104,7 +113,7 @@
   background: rgba(255, 255, 255, 0.95);
   border: 3px solid #8E44AD;
   border-radius: 15px;
-  padding: 20px;
+  padding: 15px;
   color: #333;
   box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.1);
 }
@@ -112,10 +121,10 @@
 .info-item {
   display: flex;
   justify-content: space-between;
-  margin: 8px 0;
+  margin: 6px 0;
   min-width: 180px;
   font-weight: 700;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .info-item span:first-child {
@@ -126,11 +135,21 @@
   color: #2C3E50;
 }
 
+.info-item .value {
+  color: #2C3E50;
+}
+
+.info-item .sol-value {
+  color: #16A085;
+  font-size: 16px;
+}
+
 .timer {
   color: #E74C3C;
   font-weight: 700;
 }
 
+/* BOTTOM LEFT - Controls */
 .controls {
   position: absolute;
   bottom: 20px;
@@ -138,50 +157,61 @@
   background: rgba(255, 255, 255, 0.95);
   border: 3px solid #F39C12;
   border-radius: 15px;
-  padding: 20px;
+  padding: 15px;
   color: #333;
   box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.1);
 }
 
 .control-item {
-  margin: 8px 0;
+  margin: 6px 0;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
   color: #2C3E50;
 }
 
 .control-item kbd {
   background: #FEF5E7;
-  padding: 4px 10px;
-  border-radius: 8px;
-  margin-right: 10px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  margin-right: 8px;
   font-family: 'SF Pro Display', -apple-system, sans-serif;
   border: 2px solid #F39C12;
   font-weight: 700;
   color: #E67E22;
+  font-size: 12px;
+}
+
+/* BOTTOM CENTER - Action buttons */
+.action-buttons {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
 }
 
 .exit-btn {
-  position: absolute;
-  bottom: 20px;
-  right: 20px;
   background: #E74C3C;
   color: white;
   border: 3px solid #C0392B;
-  padding: 14px 32px;
-  border-radius: 25px;
+  padding: 12px 28px;
+  border-radius: 20px;
   cursor: pointer;
   font-weight: 700;
-  font-size: 16px;
-  transition: all 0.2s;
-  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.1);
+  font-size: 15px;
+  transition: all 0.15s;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.1);
   font-family: 'SF Pro Display', -apple-system, sans-serif;
-  z-index: 15;
+  min-width: 200px;
+  text-align: center;
 }
 
 .exit-btn:hover {
-  transform: translate(-3px, -3px);
-  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.1);
 }
 
 .exit-btn:active {
@@ -444,63 +474,27 @@
   box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
 }
 
-/* Dodatkowe style dla nowego systemu */
-.player-info {
-  position: absolute;
-  top: 20px;
-  left: 240px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 3px solid #E74C3C;
-  border-radius: 15px;
-  padding: 20px;
-  color: #333;
-  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.1);
-  min-width: 200px;
-}
 
-.player-info .info-item {
-  display: flex;
-  justify-content: space-between;
-  margin: 8px 0;
-  font-weight: 700;
-  font-size: 15px;
-}
-
-.player-info .info-item span:first-child {
-  color: #7F8C8D;
-}
-
-.player-info .info-item .value {
-  color: #2C3E50;
-}
-
-.player-info .info-item .sol-value {
-  color: #16A085;
-  font-size: 18px;
-}
 
 .cash-out-btn {
-  position: absolute;
-  bottom: 80px;
-  left: 50%;
-  transform: translateX(-50%);
   background: #16A085;
   color: white;
   border: 3px solid #138871;
-  padding: 16px 32px;
-  border-radius: 25px;
+  padding: 12px 28px;
+  border-radius: 20px;
   cursor: pointer;
   font-weight: 700;
-  font-size: 18px;
-  transition: all 0.2s;
-  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.1);
+  font-size: 16px;
+  transition: all 0.15s;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.1);
   font-family: 'SF Pro Display', -apple-system, sans-serif;
-  z-index: 15;
+  min-width: 250px;
+  text-align: center;
 }
 
 .cash-out-btn:hover:not(:disabled) {
-  transform: translate(-3px, -3px);
-  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.1);
 }
 
 .cash-out-btn:disabled {
