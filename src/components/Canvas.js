@@ -1,311 +1,293 @@
 // src/components/Canvas.js
-import React, { useRef, useEffect, forwardRef, useState } from 'react';
+import React, { useRef, useEffect, forwardRef } from 'react';
 
 const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
-  const [fps, setFps] = useState(0);
-  const frameCount = useRef(0);
-  const lastTime = useRef(Date.now());
-  const animationFrameId = useRef();
-  const interpolatedPlayers = useRef(new Map());
+  const animationRef = useRef();
+  const gridPatternRef = useRef();
   
   useEffect(() => {
     if (!ref.current) return;
     
     const canvas = ref.current;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
     
-    // Resize canvas
+    // Ustaw rozmiar canvas
     const resizeCanvas = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
     };
+    
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
     
-    // Interpolation for smooth movement
-    const interpolatePosition = (current, target, factor = 0.15) => {
-      return {
-        x: current.x + (target.x - current.x) * factor,
-        y: current.y + (target.y - current.y) * factor
-      };
+    // Stwórz wzór siatki
+    const createGridPattern = () => {
+      const patternCanvas = document.createElement('canvas');
+      const patternCtx = patternCanvas.getContext('2d');
+      const gridSize = 50;
+      
+      patternCanvas.width = gridSize;
+      patternCanvas.height = gridSize;
+      
+      // Białe tło
+      patternCtx.fillStyle = '#ffffff';
+      patternCtx.fillRect(0, 0, gridSize, gridSize);
+      
+      // Szara kratka
+      patternCtx.strokeStyle = '#f0f0f0';
+      patternCtx.lineWidth = 1;
+      
+      // Rysuj linie siatki
+      patternCtx.beginPath();
+      patternCtx.moveTo(gridSize, 0);
+      patternCtx.lineTo(gridSize, gridSize);
+      patternCtx.moveTo(0, gridSize);
+      patternCtx.lineTo(gridSize, gridSize);
+      patternCtx.stroke();
+      
+      return ctx.createPattern(patternCanvas, 'repeat');
     };
     
-    // Main render function
-    const render = () => {
-      frameCount.current++;
-      
-      // Calculate FPS
-      const now = Date.now();
-      if (now - lastTime.current >= 1000) {
-        setFps(frameCount.current);
-        frameCount.current = 0;
-        lastTime.current = now;
+    gridPatternRef.current = createGridPattern();
+    
+    // Funkcja do przyciemniania koloru
+    const darkenColor = (color, percent) => {
+      // Jeśli kolor jest w formacie hsl
+      if (color.startsWith('hsl')) {
+        const match = color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+        if (match) {
+          const h = parseInt(match[1]);
+          const s = parseInt(match[2]);
+          const l = Math.max(0, parseInt(match[3]) - percent);
+          return `hsl(${h}, ${s}%, ${l}%)`;
+        }
       }
-      
-      // Clear canvas
+      // Fallback
+      return color;
+    };
+    
+    // Funkcja renderowania
+    const render = (timestamp) => {
+      // Białe tło
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
       if (!playerView || !playerView.player) {
-        ctx.fillStyle = '#000000';
-        ctx.font = '20px Arial';
-        ctx.fillText('Waiting for player data...', 100, 100);
-        animationFrameId.current = requestAnimationFrame(render);
+        animationRef.current = requestAnimationFrame(render);
         return;
       }
       
       const { player, players, food, gameState } = playerView;
       
-      // Update interpolated positions when new data arrives
-      if (players) {
-        // Clear existing interpolated players that are no longer in view
-        const currentIds = new Set(players.map(p => p.id));
-        for (const [id] of interpolatedPlayers.current) {
-          if (!currentIds.has(id)) {
-            interpolatedPlayers.current.delete(id);
-          }
-        }
-        
-        // Update or create interpolated positions
-        players.forEach(p => {
-          const existing = interpolatedPlayers.current.get(p.id);
-          if (!existing) {
-            interpolatedPlayers.current.set(p.id, {
-              x: p.x,
-              y: p.y,
-              targetX: p.x,
-              targetY: p.y,
-              radius: p.radius,
-              color: p.color,
-              nickname: p.nickname,
-              mass: p.mass,
-              isMe: p.isMe,
-              isBoosting: p.isBoosting,
-              solDisplay: p.solDisplay
-            });
-          } else {
-            existing.targetX = p.x;
-            existing.targetY = p.y;
-            existing.radius = p.radius;
-            existing.mass = p.mass;
-            existing.isBoosting = p.isBoosting;
-            existing.solDisplay = p.solDisplay;
-            existing.color = p.color;
-            existing.nickname = p.nickname;
-            existing.isMe = p.isMe;
-          }
-        });
-        
-        // Interpolate positions
-        for (const [id, interpolated] of interpolatedPlayers.current) {
-          const pos = interpolatePosition(
-            { x: interpolated.x, y: interpolated.y },
-            { x: interpolated.targetX, y: interpolated.targetY }
-          );
-          interpolated.x = pos.x;
-          interpolated.y = pos.y;
-        }
-      }
+      // Dynamiczny zoom bazowany na rozmiarze gracza i okna
+      const screenSize = Math.min(canvas.width, canvas.height);
+      const baseZoom = screenSize / 800;
+      const playerZoom = Math.max(0.8, Math.min(1.5, 100 / (player.radius * 0.3 + 50)));
+      const zoomLevel = baseZoom * playerZoom;
       
-      // Find interpolated position for camera (our player)
-      let cameraX = player.x - canvas.width / 2;
-      let cameraY = player.y - canvas.height / 2;
+      // Oblicz przesunięcie kamery
+      const cameraX = player.x - canvas.width / 2 / zoomLevel;
+      const cameraY = player.y - canvas.height / 2 / zoomLevel;
       
-      // Find our interpolated player for smooth camera movement
-      for (const [id, p] of interpolatedPlayers.current) {
-        if (p.isMe) {
-          cameraX = p.x - canvas.width / 2;
-          cameraY = p.y - canvas.height / 2;
-          break;
-        }
-      }
-      
+      // Zapisz stan kontekstu
       ctx.save();
+      
+      // Zastosuj zoom
+      ctx.scale(zoomLevel, zoomLevel);
+      
+      // Przesuń canvas względem gracza
       ctx.translate(-cameraX, -cameraY);
       
-      // Draw grid background
-      ctx.strokeStyle = '#f0f0f0';
-      ctx.lineWidth = 1;
-      const gridSize = 50;
-      const startX = Math.floor(cameraX / gridSize) * gridSize;
-      const startY = Math.floor(cameraY / gridSize) * gridSize;
-      const endX = startX + canvas.width + gridSize;
-      const endY = startY + canvas.height + gridSize;
-      
-      for (let x = startX; x < endX; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, startY);
-        ctx.lineTo(x, endY);
-        ctx.stroke();
+      // Rysuj tło z siatką
+      if (gridPatternRef.current) {
+        ctx.fillStyle = gridPatternRef.current;
+        ctx.fillRect(
+          Math.floor(cameraX / 50) * 50,
+          Math.floor(cameraY / 50) * 50,
+          (canvas.width / zoomLevel) + 100,
+          (canvas.height / zoomLevel) + 100
+        );
       }
       
-      for (let y = startY; y < endY; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(startX, y);
-        ctx.lineTo(endX, y);
-        ctx.stroke();
-      }
-      
-      // Draw map border
-      if (gameState && gameState.mapSize) {
-        ctx.strokeStyle = '#000000';
+      // Rysuj granice mapy
+      if (gameState?.mapSize) {
+        ctx.strokeStyle = '#333333';
         ctx.lineWidth = 5;
         ctx.strokeRect(0, 0, gameState.mapSize, gameState.mapSize);
       }
       
-      // Draw food with slight pulsing animation
-      const foodPulse = Math.sin(now * 0.003) * 0.1 + 1;
-      if (food && food.length > 0) {
-        food.forEach(f => {
-          ctx.fillStyle = f.color || '#FF6B6B';
-          ctx.beginPath();
-          ctx.arc(f.x, f.y, f.radius * foodPulse, 0, Math.PI * 2);
-          ctx.fill();
-          
-          // Add slight glow effect
-          ctx.shadowBlur = 5;
-          ctx.shadowColor = f.color || '#FF6B6B';
-          ctx.fill();
-          ctx.shadowBlur = 0;
-        });
-      }
-      
-      // Draw all players (use interpolated positions)
-      for (const [id, p] of interpolatedPlayers.current) {
-        // Draw player shadow
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      // Rysuj jedzenie
+      food.forEach(f => {
+        // Cień
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+        ctx.shadowBlur = 5;
+        ctx.shadowOffsetX = 2;
+        ctx.shadowOffsetY = 2;
+        
+        ctx.fillStyle = f.color;
         ctx.beginPath();
-        ctx.arc(p.x + 3, p.y + 3, p.radius, 0, Math.PI * 2);
+        ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
         ctx.fill();
         
-        // Draw player body
-        ctx.fillStyle = p.color || '#0095DD';
+        // Reset cienia
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+      });
+      
+      // Rysuj graczy - sortuj według rozmiaru (mniejsze najpierw, większe na wierzchu)
+      const sortedPlayers = [...players].sort((a, b) => a.radius - b.radius);
+      
+      sortedPlayers.forEach(p => {
+        // Sprawdź czy gracz jest w niebezpieczeństwie
+        let inDanger = false;
+        if (p.isMe && player.isAlive) {
+          players.forEach(other => {
+            if (other.id !== p.id && other.radius > p.radius * 1.1) {
+              const dx = other.x - p.x;
+              const dy = other.y - p.y;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              if (distance < other.radius + p.radius) {
+                inDanger = true;
+              }
+            }
+          });
+        }
+        
+        // Cień gracza
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetX = 3;
+        ctx.shadowOffsetY = 3;
+        
+        // Ciało gracza
+        ctx.fillStyle = p.color;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
         ctx.fill();
         
-        // Draw boost effect
+        // Boost effect
         if (p.isBoosting) {
           ctx.strokeStyle = '#FFD700';
           ctx.lineWidth = 3;
+          ctx.setLineDash([5, 5]);
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.radius + 5, 0, Math.PI * 2);
           ctx.stroke();
+          ctx.setLineDash([]);
         }
         
-        // Draw border for own player
-        if (p.isMe) {
-          ctx.strokeStyle = '#FFD700';
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.radius + 2, 0, Math.PI * 2);
-          ctx.stroke();
+        // Obramowanie
+        const borderColor = darkenColor(p.color, 20);
+        if (inDanger) {
+          ctx.strokeStyle = '#FF0000';
+          ctx.lineWidth = 5;
+          ctx.setLineDash([10, 5]);
+        } else {
+          ctx.strokeStyle = borderColor;
+          ctx.lineWidth = p.isMe ? 3 : 2;
+          ctx.setLineDash([]);
         }
+        ctx.stroke();
         
-        // Draw player name
+        // Reset cienia
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        
+        // Nazwa gracza
         ctx.fillStyle = '#FFFFFF';
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 3;
-        ctx.font = `${Math.max(14, p.radius / 4)}px Arial`;
+        ctx.font = `${Math.max(12, p.radius / 4)}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        const name = p.nickname || 'Player';
-        ctx.strokeText(name, p.x, p.y - 5);
-        ctx.fillText(name, p.x, p.y - 5);
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.lineWidth = 3;
+        ctx.strokeText(p.nickname || 'Player', p.x, p.y - p.radius / 6);
+        ctx.fillText(p.nickname || 'Player', p.x, p.y - p.radius / 6);
         
-        // Draw mass/SOL value
-        const valueText = p.solDisplay ? `${p.solDisplay}` : `${Math.floor(p.mass)}`;
-        ctx.font = `${Math.max(12, p.radius / 5)}px Arial`;
-        ctx.strokeText(valueText, p.x, p.y + p.radius / 3);
-        ctx.fillText(valueText, p.x, p.y + p.radius / 3);
-      }
+        // Wartość SOL gracza
+        if (p.solDisplay) {
+          ctx.font = `${Math.max(10, p.radius / 6)}px Arial`;
+          ctx.fillStyle = '#FFFFFF';
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+          ctx.lineWidth = 2;
+          const solText = `${p.solDisplay} SOL`;
+          ctx.strokeText(solText, p.x, p.y + p.radius / 3);
+          ctx.fillText(solText, p.x, p.y + p.radius / 3);
+        }
+      });
       
+      // Przywróć stan kontekstu
       ctx.restore();
       
-      // Draw minimap
-      const minimapSize = 150;
-      const minimapMargin = 20;
-      const minimapX = canvas.width - minimapSize - minimapMargin;
-      const minimapY = canvas.height - minimapSize - minimapMargin;
+      // Rysuj miniaturkę mapy
+      drawMinimap(ctx, canvas, player, gameState, sortedPlayers);
       
-      // Minimap background
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      animationRef.current = requestAnimationFrame(render);
+    };
+    
+    // Funkcja rysowania minimapy
+    const drawMinimap = (ctx, canvas, player, gameState, players) => {
+      if (!gameState?.mapSize) return;
+      
+      const minimapSize = 200;
+      const minimapPadding = 20;
+      const minimapX = canvas.width - minimapSize - minimapPadding;
+      const minimapY = canvas.height - minimapSize - minimapPadding;
+      
+      // Tło minimapy
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
       ctx.fillRect(minimapX, minimapY, minimapSize, minimapSize);
       
-      // Minimap border
-      ctx.strokeStyle = '#FFFFFF';
+      // Obramowanie
+      ctx.strokeStyle = '#000000';
       ctx.lineWidth = 2;
       ctx.strokeRect(minimapX, minimapY, minimapSize, minimapSize);
       
-      // Draw players on minimap
-      if (gameState && gameState.mapSize) {
-        const scale = minimapSize / gameState.mapSize;
+      // Skala
+      const scale = minimapSize / gameState.mapSize;
+      
+      // Rysuj wszystkich graczy na minimapie
+      players.forEach(p => {
+        const playerMinimapX = minimapX + p.x * scale;
+        const playerMinimapY = minimapY + p.y * scale;
+        const playerMinimapRadius = Math.max(2, p.radius * scale);
         
-        // Draw all players as dots
-        for (const [id, p] of interpolatedPlayers.current) {
-          const dotX = minimapX + p.x * scale;
-          const dotY = minimapY + p.y * scale;
-          const dotSize = Math.max(2, p.radius * scale);
-          
-          ctx.fillStyle = p.isMe ? '#FFD700' : '#FF0000';
-          ctx.beginPath();
-          ctx.arc(dotX, dotY, dotSize, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
+        ctx.fillStyle = p.isMe ? '#FFD700' : p.color;
+        ctx.beginPath();
+        ctx.arc(playerMinimapX, playerMinimapY, playerMinimapRadius, 0, Math.PI * 2);
+        ctx.fill();
+      });
       
-      // Draw HUD
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.fillRect(10, 10, 200, 100);
-      
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '14px Arial';
-      ctx.textAlign = 'left';
-      ctx.fillText(`FPS: ${fps}`, 20, 30);
-      ctx.fillText(`Position: ${Math.floor(player.x)}, ${Math.floor(player.y)}`, 20, 50);
-      ctx.fillText(`Mass: ${Math.floor(player.mass)}`, 20, 70);
-      ctx.fillText(`Value: ${(player.solValue / 1000000000).toFixed(4)} SOL`, 20, 90);
-      
-      // Debug info
-      if (now % 1000 < 16) {
-        console.log('Canvas render:', {
-          playerPos: `${Math.floor(player.x)}, ${Math.floor(player.y)}`,
-          cameraPos: `${Math.floor(cameraX)}, ${Math.floor(cameraY)}`,
-          playersCount: interpolatedPlayers.current.size,
-          foodCount: food ? food.length : 0
-        });
-      }
-      
-      // Continue animation
-      animationFrameId.current = requestAnimationFrame(render);
+      // Obszar widoczny
+      const viewSize = 1000 * scale;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(
+        minimapX + player.x * scale - viewSize / 2,
+        minimapY + player.y * scale - viewSize / 2,
+        viewSize,
+        viewSize
+      );
     };
     
-    // Start render loop
+    // Rozpocznij renderowanie
     render();
     
-    // Cleanup
     return () => {
       window.removeEventListener('resize', resizeCanvas);
-      if (animationFrameId.current) {
-        cancelAnimationFrame(animationFrameId.current);
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [playerView]);
+  }, [playerView, ref]);
   
   return (
     <canvas
       ref={ref}
+      className="game-canvas"
       onMouseMove={onMouseMove}
-      style={{ 
-        display: 'block',
-        cursor: 'crosshair',
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%'
-      }}
+      onContextMenu={(e) => e.preventDefault()}
     />
   );
 });

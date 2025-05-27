@@ -33,7 +33,7 @@ const io = new Server(server, {
 // Konfiguracja Solana
 const SOLANA_NETWORK = process.env.SOLANA_NETWORK || 'devnet';
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || clusterApiUrl(SOLANA_NETWORK);
-const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || '7rw6uErfMmgnwZWs3UReFGc1aBtbM152WkV8kudY9aMd');
+const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || '7vEFGgPDdATrHR7WqQk3sfAxkgFwyoM9tJVGndFpVhyr');
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
@@ -108,26 +108,6 @@ app.post('/api/game/cashout', async (req, res) => {
   }
 });
 
-// Aktualizacja wartości gracza po zjedzeniu
-app.post('/api/game/update-value', async (req, res) => {
-  try {
-    const { eaterAddress, eatenAddress, eatenValue, transactionSignature } = req.body;
-    
-    console.log('Updating player value:', {
-      eaterAddress,
-      eatenAddress,
-      eatenValue
-    });
-    
-    // TODO: Weryfikacja transakcji na blockchainie
-    
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error updating value:', error);
-    res.status(500).json({ error: 'Failed to update value' });
-  }
-});
-
 // Health check
 app.get('/health', (req, res) => {
   res.json({ 
@@ -180,30 +160,11 @@ io.on('connection', (socket) => {
     playerSockets.set(playerAddress, socket.id);
     socketPlayers.set(socket.id, { playerAddress, nickname });
     
-    console.log('Socket mappings:', {
-      playerSockets: playerSockets.size,
-      socketId: socket.id,
-      playerAddress
-    });
-    
     // Dołącz do globalnej gry
     socket.join('game');
     
     // Dodaj gracza do gry
     const player = globalGame.addPlayer(playerAddress, nickname, initialStake);
-    
-    console.log('Player added to game:', {
-      playerExists: !!player,
-      isAlive: player?.isAlive,
-      position: player ? `${player.x}, ${player.y}` : 'N/A',
-      mass: player?.mass,
-      radius: player?.radius
-    });
-    
-    console.log('Global game state:', {
-      totalPlayers: globalGame.players.size,
-      activePlayers: Array.from(globalGame.players.values()).filter(p => p.isAlive).length
-    });
     
     console.log(`Player ${playerAddress} (${nickname}) joined game with stake: ${initialStake}`);
     
@@ -212,21 +173,6 @@ io.on('connection', (socket) => {
       success: true,
       player: player.toJSON()
     });
-    
-    // WAŻNE: Natychmiast wyślij widok gracza
-    const playerView = globalGame.getPlayerView(playerAddress);
-    if (playerView) {
-      console.log('Sending immediate player view to', playerAddress.substring(0, 8), {
-        hasPlayer: !!playerView.player,
-        playerAlive: playerView.player?.isAlive,
-        playerPos: playerView.player ? `${playerView.player.x}, ${playerView.player.y}` : 'N/A',
-        playersCount: playerView.players?.length,
-        foodCount: playerView.food?.length
-      });
-      socket.emit('player_view', playerView);
-    } else {
-      console.error('Could not generate player view for', playerAddress);
-    }
   });
   
   socket.on('respawn', ({ playerAddress }) => {
@@ -237,27 +183,10 @@ io.on('connection', (socket) => {
     globalGame.addPlayer(playerAddress, player.nickname, 0); // Respawn bez dodatkowej stawki
     
     console.log(`Player ${playerAddress} respawned`);
-    
-    // Natychmiast wyślij nowy widok
-    const playerView = globalGame.getPlayerView(playerAddress);
-    if (playerView) {
-      socket.emit('player_view', playerView);
-    }
   });
   
   socket.on('player_input', (data) => {
     const { playerAddress, input } = data;
-    
-    // Debug log co sekundę
-    if (Date.now() % 1000 < 50) {
-      console.log(`Input from ${playerAddress.substring(0, 8)}:`, {
-        mouseX: input.mouseX?.toFixed(0),
-        mouseY: input.mouseY?.toFixed(0),
-        split: input.split,
-        eject: input.eject
-      });
-    }
-    
     globalGame.updatePlayer(playerAddress, input);
   });
   
@@ -281,7 +210,6 @@ io.on('connection', (socket) => {
       const { playerAddress } = playerInfo;
       
       // Nie usuwaj gracza z gry - może wrócić
-      // Tylko usuń mapowania socketów
       playerSockets.delete(playerAddress);
       socketPlayers.delete(socket.id);
       
@@ -302,15 +230,22 @@ function broadcastGameState() {
     const playerView = globalGame.getPlayerView(playerAddress);
     
     if (!playerView) {
-      console.error(`No player view for ${playerAddress}`);
       continue;
     }
     
     io.to(socketId).emit('player_view', playerView);
+    
+    // Jeśli gracz został zjedzony
+    if (!playerView.player.isAlive && globalGame.isRunning) {
+      io.to(socketId).emit('player_eliminated', {
+        playerAddress,
+        canRespawn: playerView.canRespawn
+      });
+    }
   }
 }
 
-// Broadcast co 16ms (60 FPS dla klientów) - tak jak w wersji pokojowej
+// Broadcast co 16ms (60 FPS dla klientów)
 setInterval(broadcastGameState, 16);
 
 // Statystyki gry co minutę

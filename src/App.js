@@ -67,6 +67,19 @@ function AppContent() {
     }
   }, [currentView, publicKey, playerStake, playerNickname]);
   
+  // Zarządzaj klasą body dla gry
+  useEffect(() => {
+    if (currentView === 'game') {
+      document.body.classList.add('game-active');
+    } else {
+      document.body.classList.remove('game-active');
+    }
+    
+    return () => {
+      document.body.classList.remove('game-active');
+    };
+  }, [currentView]);
+  
   const handleJoinGame = (stake, nickname) => {
     setPlayerStake(stake);
     setPlayerNickname(nickname);
@@ -82,19 +95,21 @@ function AppContent() {
   
   return (
     <div className="app">
-      <header className="app-header">
-        <div className="header-content">
-          <img src="/logo.png" alt="Dotara.io" className="logo" />
-        </div>
-        <div className="wallet-section">
-          <WalletMultiButton />
-          {publicKey && (
-            <div className="wallet-info">
-              <span className="balance">Connected</span>
-            </div>
-          )}
-        </div>
-      </header>
+      {currentView !== 'game' && (
+        <header className="app-header">
+          <div className="header-content">
+            <img src="/logo.png" alt="Dotara.io" className="logo" />
+          </div>
+          <div className="wallet-section">
+            <WalletMultiButton />
+            {publicKey && (
+              <div className="wallet-info">
+                <span className="balance">Connected</span>
+              </div>
+            )}
+          </div>
+        </header>
+      )}
       
       <main className="app-main">
         {currentView === 'join' && (

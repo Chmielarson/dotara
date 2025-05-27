@@ -1,7 +1,7 @@
 // src/components/JoinGame.js
 import React, { useState, useEffect } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { joinGlobalGame } from '../utils/SolanaTransactions';
+import { joinGlobalGame, initializeGlobalGame, checkGlobalGameState } from '../utils/SolanaTransactions';
 import Chat from './Chat';
 import './JoinGame.css';
 
@@ -14,6 +14,28 @@ export default function JoinGame({ onJoinGame, socket }) {
   const [isJoining, setIsJoining] = useState(false);
   const [error, setError] = useState('');
   const [gameStats, setGameStats] = useState(null);
+  const [gameInitialized, setGameInitialized] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [checkingGame, setCheckingGame] = useState(true);
+  
+  // Check if global game is initialized
+  useEffect(() => {
+    const checkGame = async () => {
+      try {
+        setCheckingGame(true);
+        const gameState = await checkGlobalGameState();
+        setGameInitialized(gameState.initialized);
+        console.log('Global game state:', gameState);
+      } catch (error) {
+        console.error('Error checking game state:', error);
+        setGameInitialized(false);
+      } finally {
+        setCheckingGame(false);
+      }
+    };
+    
+    checkGame();
+  }, []);
   
   // Fetch game stats
   useEffect(() => {
@@ -28,11 +50,39 @@ export default function JoinGame({ onJoinGame, socket }) {
       }
     };
     
-    fetchGameStats();
-    const interval = setInterval(fetchGameStats, 5000); // Update every 5 seconds
+    if (gameInitialized) {
+      fetchGameStats();
+      const interval = setInterval(fetchGameStats, 5000); // Update every 5 seconds
+      return () => clearInterval(interval);
+    }
+  }, [gameInitialized]);
+  
+  const handleInitializeGame = async () => {
+    if (!publicKey) {
+      setError('Please connect your wallet');
+      return;
+    }
     
-    return () => clearInterval(interval);
-  }, []);
+    try {
+      setIsInitializing(true);
+      setError('');
+      
+      const result = await initializeGlobalGame(wallet);
+      
+      if (result.alreadyInitialized) {
+        setError('Game is already initialized');
+        setGameInitialized(true);
+      } else {
+        alert('Global game initialized successfully!');
+        setGameInitialized(true);
+      }
+    } catch (error) {
+      console.error('Error initializing game:', error);
+      setError(`Failed to initialize: ${error.message}`);
+    } finally {
+      setIsInitializing(false);
+    }
+  };
   
   const handleJoin = async () => {
     if (!publicKey) {
@@ -66,6 +116,68 @@ export default function JoinGame({ onJoinGame, socket }) {
       setIsJoining(false);
     }
   };
+  
+  // Show initialization screen if game not initialized
+  if (!gameInitialized && !checkingGame) {
+    return (
+      <div className="join-game-container">
+        <div className="join-content">
+          <div className="join-box" style={{ maxWidth: '600px', margin: '0 auto' }}>
+            <h1>Initialize Global Game</h1>
+            <p className="subtitle">The global game needs to be initialized first</p>
+            
+            <div style={{ 
+              background: '#FEF5E7', 
+              border: '3px solid #F39C12', 
+              borderRadius: '15px', 
+              padding: '20px',
+              marginBottom: '30px'
+            }}>
+              <p style={{ margin: 0, color: '#34495E', fontWeight: 700 }}>
+                This is a one-time setup that creates the global game account on the blockchain. 
+                After initialization, all players can join and play in the same persistent world.
+              </p>
+            </div>
+            
+            {error && (
+              <div className="error-message" style={{ marginBottom: '20px' }}>
+                {error}
+              </div>
+            )}
+            
+            <button 
+              className="join-button"
+              onClick={handleInitializeGame}
+              disabled={isInitializing || !publicKey}
+              style={{ marginBottom: '20px' }}
+            >
+              {isInitializing ? 'Initializing...' : 
+               !publicKey ? 'Connect Wallet First' : 
+               'Initialize Global Game'}
+            </button>
+            
+            <div style={{ textAlign: 'center', color: '#7F8C8D', fontSize: '14px' }}>
+              <p>Note: Only needs to be done once per program deployment</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Show loading while checking
+  if (checkingGame) {
+    return (
+      <div className="join-game-container">
+        <div className="join-content">
+          <div className="join-box" style={{ textAlign: 'center' }}>
+            <h2>Checking game status...</h2>
+            <div className="spinner" style={{ margin: '20px auto' }}></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   
   return (
     <div className="join-game-container">

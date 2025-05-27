@@ -36,9 +36,6 @@ class Player {
     // Statystyki
     this.playersEaten = 0;
     this.totalSolEarned = 0;
-    
-    // Debug
-    this.lastUpdateTime = Date.now();
   }
   
   calculateRadius() {
@@ -69,30 +66,12 @@ class Player {
   }
   
   setTarget(x, y) {
-    // Upewnij się, że to są liczby
-    this.targetX = parseFloat(x);
-    this.targetY = parseFloat(y);
-    
-    // Debug
-    if (isNaN(this.targetX) || isNaN(this.targetY)) {
-      console.error(`Invalid target coordinates: x=${x} (${typeof x}), y=${y} (${typeof y})`);
-      // Ustaw na aktualną pozycję jeśli nieprawidłowe
-      this.targetX = this.x;
-      this.targetY = this.y;
-    }
+    this.targetX = x;
+    this.targetY = y;
   }
   
   update(deltaTime, mapSize) {
     if (!this.isAlive) return;
-    
-    // Debug deltaTime
-    const now = Date.now();
-    const realDelta = (now - this.lastUpdateTime) / 1000;
-    this.lastUpdateTime = now;
-    
-    if (Math.abs(deltaTime - realDelta) > 0.1) {
-      console.log(`DeltaTime mismatch! Provided: ${deltaTime}, Real: ${realDelta}`);
-    }
     
     // Sprawdź czy boost się skończył
     if (this.isBoosting && Date.now() > this.boostEndTime) {
@@ -124,22 +103,9 @@ class Player {
       this.velocityX = dirX * speed;
       this.velocityY = dirY * speed;
       
-      // Aktualizuj pozycję - używaj stałej prędkości zamiast deltaTime
-      const moveSpeed = Math.min(distance, speed);
-      this.x += dirX * moveSpeed;
-      this.y += dirY * moveSpeed;
-      
-      // Debug log co 5 sekund
-      if (now % 5000 < 50) {
-        console.log(`Player ${this.address.substring(0, 8)} update:`, {
-          from: { x: (this.x - dirX * moveSpeed).toFixed(0), y: (this.y - dirY * moveSpeed).toFixed(0) },
-          to: { x: this.x.toFixed(0), y: this.y.toFixed(0) },
-          target: { x: this.targetX.toFixed(0), y: this.targetY.toFixed(0) },
-          speed: speed.toFixed(2),
-          distance: distance.toFixed(0),
-          deltaTime: deltaTime.toFixed(3)
-        });
-      }
+      // Aktualizuj pozycję
+      this.x += this.velocityX * deltaTime * 60;
+      this.y += this.velocityY * deltaTime * 60;
       
       // Ograniczenia mapy
       const mapMargin = this.radius * 0.3;

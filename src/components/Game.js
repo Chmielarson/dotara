@@ -17,30 +17,15 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   const [canRespawn, setCanRespawn] = useState(false);
   const [isCashingOut, setIsCashingOut] = useState(false);
   const [showCashOutModal, setShowCashOutModal] = useState(false);
-  const [playerJoined, setPlayerJoined] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('Initializing...');
+  const [connectionStatus, setConnectionStatus] = useState('Connecting...');
   
   const canvasRef = useRef(null);
-  const mouseInitialized = useRef(false);
   const inputRef = useRef({
     mouseX: 0,
     mouseY: 0,
     split: false,
     eject: false
   });
-  
-  // Initialize mouse position when player data is received
-  useEffect(() => {
-    if (playerView?.player && !mouseInitialized.current) {
-      inputRef.current.mouseX = playerView.player.x;
-      inputRef.current.mouseY = playerView.player.y;
-      mouseInitialized.current = true;
-      console.log('Initialized mouse position to player position:', {
-        x: playerView.player.x,
-        y: playerView.player.y
-      });
-    }
-  }, [playerView]);
   
   // Zapobiegaj przewijaniu strony podczas gry
   useEffect(() => {
@@ -63,57 +48,67 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   
   // Connect to game
   useEffect(() => {
-    if (!socket || !publicKey || playerJoined) {
-      console.log('Skipping join - conditions not met:', { 
-        socket: !!socket, 
-        publicKey: !!publicKey, 
-        playerJoined 
-      });
+    if (!socket || !publicKey) {
+      console.log('Missing socket or publicKey:', { socket: !!socket, publicKey: !!publicKey });
       return;
     }
     
-    setConnectionStatus('Connecting to game server...');
+    console.log('Setting up game connection...');
+    setConnectionStatus('Joining game...');
     
-    console.log('Emitting join_game with:', {
+    // Join game immediately
+    console.log('Emitting join_game:', {
       playerAddress: publicKey.toString(),
-      nickname: nickname,
-      initialStake: initialStake
+      nickname,
+      initialStake
     });
     
     socket.emit('join_game', {
       playerAddress: publicKey.toString(),
-      nickname: nickname,
+      nickname: nickname || `Player ${publicKey.toString().substring(0, 6)}`,
       initialStake: initialStake
     });
     
-    socket.on('joined_game', (data) => {
+    // Set up event listeners
+    const handleJoinedGame = (data) => {
       console.log('Received joined_game:', data);
       if (data.success) {
         setIsConnected(true);
-        setPlayerJoined(true);
-        setConnectionStatus('Connected! Waiting for game data...');
-      } else {
-        setConnectionStatus('Failed to join game');
+        setConnectionStatus('Connected to game');
       }
-    });
+    };
     
-    socket.on('game_state', (state) => {
-      console.log('Received game_state');
+    const handleGameState = (state) => {
+      console.log('Received game_state:', {
+        playerCount: state.playerCount,
+        foodCount: state.foodCount,
+        mapSize: state.mapSize
+      });
       setGameState(state);
-    });
+    };
     
-    socket.on('player_view', (view) => {
-      // Log zawsze żeby zobaczyć czy otrzymujesz dane
+    const handlePlayerView = (view) => {
+      if (!view) {
+        console.error('Received null player view');
+        return;
+      }
+      
       console.log('Received player_view:', {
-        timestamp: Date.now(),
-        hasPlayer: !!view?.player,
-        playerPos: view?.player ? `${Math.floor(view.player.x)}, ${Math.floor(view.player.y)}` : 'N/A',
-        foodCount: view?.food?.length,
-        playersCount: view?.players?.length
+        hasPlayer: !!view.player,
+        playerAlive: view.player?.isAlive,
+        playerPos: view.player ? `${Math.floor(view.player.x)}, ${Math.floor(view.player.y)}` : 'N/A',
+        playersCount: view.players?.length || 0,
+        foodCount: view.food?.length || 0
       });
       
       setPlayerView(view);
       setConnectionStatus('In game');
+      
+      // Initialize mouse position to player position
+      if (view.player && inputRef.current.mouseX === 0 && inputRef.current.mouseY === 0) {
+        inputRef.current.mouseX = view.player.x;
+        inputRef.current.mouseY = view.player.y;
+      }
       
       if (view.player && !view.player.isAlive) {
         setIsPlayerDead(true);
@@ -121,63 +116,54 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
       } else {
         setIsPlayerDead(false);
       }
-    });
+    };
     
-    socket.on('player_eliminated', (data) => {
+    const handlePlayerEliminated = (data) => {
+      console.log('Player eliminated:', data);
       if (data.playerAddress === publicKey.toString()) {
         setIsPlayerDead(true);
         setCanRespawn(data.canRespawn);
       }
-    });
+    };
     
-    socket.on('cash_out_result', (result) => {
+    const handleCashOutResult = (result) => {
       console.log('Cash out successful:', result);
       onLeaveGame();
-    });
-    
-    socket.on('connect', () => {
-      console.log('Socket connected');
-      setConnectionStatus('Socket connected');
-    });
-    
-    socket.on('disconnect', () => {
-      console.log('Socket disconnected');
-      setConnectionStatus('Disconnected from server');
-    });
-    
-    socket.on('error', (error) => {
-      console.error('Socket error:', error);
-      setConnectionStatus('Connection error: ' + error.message);
-    });
-    
-    return () => {
-      socket.off('joined_game');
-      socket.off('game_state');
-      socket.off('player_view');
-      socket.off('player_eliminated');
-      socket.off('cash_out_result');
-      socket.off('error');
-      socket.off('connect');
-      socket.off('disconnect');
     };
-  }, [socket, publicKey, nickname, initialStake, playerJoined, onLeaveGame]);
+    
+    const handleError = (error) => {
+      console.error('Game error:', error);
+      setConnectionStatus(`Error: ${error.message || error}`);
+    };
+    
+    // Register all event listeners
+    socket.on('joined_game', handleJoinedGame);
+    socket.on('game_state', handleGameState);
+    socket.on('player_view', handlePlayerView);
+    socket.on('player_eliminated', handlePlayerEliminated);
+    socket.on('cash_out_result', handleCashOutResult);
+    socket.on('error', handleError);
+    
+    // Clean up
+    return () => {
+      console.log('Cleaning up game connection');
+      socket.off('joined_game', handleJoinedGame);
+      socket.off('game_state', handleGameState);
+      socket.off('player_view', handlePlayerView);
+      socket.off('player_eliminated', handlePlayerEliminated);
+      socket.off('cash_out_result', handleCashOutResult);
+      socket.off('error', handleError);
+    };
+  }, [socket, publicKey, nickname, initialStake, onLeaveGame]);
   
   // Send player input
   useEffect(() => {
-    if (!socket || !isConnected || !playerJoined || !publicKey) return;
+    if (!socket || !isConnected || !publicKey) return;
     
     const sendInput = () => {
-      const currentInput = {
-        mouseX: inputRef.current.mouseX,
-        mouseY: inputRef.current.mouseY,
-        split: inputRef.current.split,
-        eject: inputRef.current.eject
-      };
-      
-      // Zawsze wysyłaj input, nawet jeśli to te same współrzędne
       socket.emit('player_input', {
         playerAddress: publicKey.toString(),
-        input: currentInput
+        input: inputRef.current
       });
       
       // Reset one-time actions
@@ -185,10 +171,10 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
       inputRef.current.eject = false;
     };
     
-    const interval = setInterval(sendInput, 33); // 30 times per second
+    const interval = setInterval(sendInput, 33); // 30 FPS
     
     return () => clearInterval(interval);
-  }, [socket, isConnected, playerJoined, publicKey]);
+  }, [socket, isConnected, publicKey]);
   
   // Mouse handling
   const handleMouseMove = useCallback((e) => {
@@ -206,23 +192,18 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
       const centerX = canvas.width / 2;
       const centerY = canvas.height / 2;
       
-      // Simple world coordinates - no zoom for now
-      const worldX = playerView.player.x + (x - centerX);
-      const worldY = playerView.player.y + (y - centerY);
+      // Calculate zoom level
+      const screenSize = Math.min(canvas.width, canvas.height);
+      const baseZoom = screenSize / 800;
+      const playerZoom = Math.max(0.8, Math.min(1.5, 100 / (playerView.player.radius * 0.3 + 50)));
+      const zoomLevel = baseZoom * playerZoom;
       
-      // WAŻNE: Upewnij się, że to są liczby, nie stringi!
-      inputRef.current.mouseX = parseFloat(worldX);
-      inputRef.current.mouseY = parseFloat(worldY);
+      // Calculate position in game world with zoom
+      const worldX = playerView.player.x + (x - centerX) / zoomLevel;
+      const worldY = playerView.player.y + (y - centerY) / zoomLevel;
       
-      // Debug log only occasionally
-      if (Date.now() % 500 < 16) {
-        console.log('Mouse input:', {
-          screen: { x: x.toFixed(0), y: y.toFixed(0) },
-          world: { x: worldX.toFixed(0), y: worldY.toFixed(0) },
-          player: { x: playerView.player.x.toFixed(0), y: playerView.player.y.toFixed(0) },
-          type: { mouseX: typeof inputRef.current.mouseX, mouseY: typeof inputRef.current.mouseY }
-        });
-      }
+      inputRef.current.mouseX = worldX;
+      inputRef.current.mouseY = worldY;
     }
   }, [playerView, isPlayerDead]);
   
@@ -305,18 +286,25 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     return (lamports / 1000000000).toFixed(4);
   };
   
-  // Add useEffect to check canvas ref
-  useEffect(() => {
-    console.log('Canvas ref status:', { 
-      hasRef: !!canvasRef.current,
-      element: canvasRef.current 
-    });
-  }, []);
-  
-  // Debug connection status
-  useEffect(() => {
-    console.log('Connection status:', connectionStatus);
-  }, [connectionStatus]);
+  // Show loading screen if no player view yet
+  if (!playerView) {
+    return (
+      <div className="game-container">
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          textAlign: 'center',
+          color: '#333'
+        }}>
+          <h2>{connectionStatus}</h2>
+          <div className="spinner" style={{ margin: '20px auto' }}></div>
+          <p>Waiting for game data...</p>
+        </div>
+      </div>
+    );
+  }
   
   return (
     <div className="game-container">
