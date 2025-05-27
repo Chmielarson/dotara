@@ -5,8 +5,17 @@ const Physics = require('./Physics');
 
 class GameEngine {
   constructor() {
-    this.mapSize = 5000; // Większa mapa dla ciągłej gry
-    this.maxFood = 500; // Więcej jedzenia
+    this.mapSize = 10000; // Mapa 10000x10000
+    this.zoneSize = 5000; // Każda strefa 5000x5000
+    this.zones = [
+      { id: 1, name: 'Bronze Zone', minSol: 0, maxSol: 1, color: '#CD7F32' },
+      { id: 2, name: 'Silver Zone', minSol: 1, maxSol: 5, color: '#C0C0C0' },
+      { id: 3, name: 'Gold Zone', minSol: 5, maxSol: 10, color: '#FFD700' },
+      { id: 4, name: 'Diamond Zone', minSol: 10, maxSol: Infinity, color: '#B9F2FF' }
+    ];
+    
+    this.maxFoodPerZone = 500; // Jedzenie per strefa (zwiększone)
+    this.maxTotalFood = 2500; // Maksymalna całkowita ilość jedzenia (zwiększone)
     this.players = new Map();
     this.food = new Map();
     this.physics = new Physics();
@@ -24,24 +33,91 @@ class GameEngine {
     // Callback dla blockchain updates
     this.onPlayerEaten = null;
     
-    console.log(`Global game engine created with map size ${this.mapSize}`);
+    console.log(`Global game engine created with map size ${this.mapSize} (4 zones of ${this.zoneSize}x${this.zoneSize})`);
     
-    // Inicjalizuj jedzenie
+    // Inicjalizuj jedzenie we wszystkich strefach
     this.initializeFood();
   }
   
-  initializeFood() {
-    for (let i = 0; i < this.maxFood; i++) {
-      this.spawnFood();
+  // Określ strefę na podstawie pozycji
+  getZoneFromPosition(x, y) {
+    // Mapa 10000x10000 podzielona na 4 strefy 5000x5000
+    // [1][2]
+    // [3][4]
+    if (x < 5000) {
+      return y < 5000 ? 1 : 3;
+    } else {
+      return y < 5000 ? 2 : 4;
     }
   }
   
-  spawnFood() {
+  // Określ granice strefy
+  getZoneBounds(zoneId) {
+    switch(zoneId) {
+      case 1: return { minX: 0, maxX: 5000, minY: 0, maxY: 5000 };
+      case 2: return { minX: 5000, maxX: 10000, minY: 0, maxY: 5000 };
+      case 3: return { minX: 0, maxX: 5000, minY: 5000, maxY: 10000 };
+      case 4: return { minX: 5000, maxX: 10000, minY: 5000, maxY: 10000 };
+      default: return { minX: 0, maxX: 5000, minY: 0, maxY: 5000 };
+    }
+  }
+  
+  // Określ odpowiednią strefę dla gracza na podstawie SOL
+  getAppropriateZoneForPlayer(solValue) {
+    const solInSol = solValue / 1000000000; // Konwersja z lamports na SOL
+    
+    for (let i = this.zones.length - 1; i >= 0; i--) {
+      const zone = this.zones[i];
+      if (solInSol >= zone.minSol) {
+        return zone.id;
+      }
+    }
+    
+    return 1; // Domyślnie strefa 1
+  }
+  
+  // Sprawdź czy gracz może wejść do strefy
+  canPlayerEnterZone(player, zoneId) {
+    const zone = this.zones[zoneId - 1];
+    const playerSol = player.solValue / 1000000000;
+    
+    // Gracz może wejść do strefy jeśli ma wystarczająco SOL
+    // LUB jeśli idzie do niższej strefy (zawsze można zejść niżej)
+    return playerSol >= zone.minSol || zoneId < player.currentZone;
+  }
+  
+  initializeFood() {
+    // Inicjalizuj jedzenie w każdej strefie
+    for (let zoneId = 1; zoneId <= 4; zoneId++) {
+      const bounds = this.getZoneBounds(zoneId);
+      
+      // Dodaj początkową ilość jedzenia
+      const initialFood = Math.min(this.maxFoodPerZone, 400); // Więcej na start
+      for (let i = 0; i < initialFood; i++) {
+        this.spawnFoodInZone(zoneId, bounds);
+      }
+    }
+    
+    console.log(`Initialized with ${this.food.size} food items`);
+  }
+  
+  spawnFoodInZone(zoneId, bounds) {
+    // Zabezpieczenie przed przepełnieniem
+    if (this.food.size >= this.maxTotalFood) {
+      return;
+    }
+    
+    // Dodaj margines, żeby jedzenie nie pojawiało się na granicach
+    const margin = 100;
+    const x = bounds.minX + margin + Math.random() * (bounds.maxX - bounds.minX - 2 * margin);
+    const y = bounds.minY + margin + Math.random() * (bounds.maxY - bounds.minY - 2 * margin);
+    
     const food = new Food(
-      Math.random() * this.mapSize,
-      Math.random() * this.mapSize,
-      Math.random() * 10 + 5 // masa 5-15
+      x,
+      y,
+      Math.random() * 15 + 10 // Takie samo jedzenie we wszystkich strefach (10-25)
     );
+    food.zoneId = zoneId;
     this.food.set(food.id, food);
   }
   
@@ -54,17 +130,33 @@ class GameEngine {
       return player;
     }
     
-    // Losowa pozycja startowa z marginesem od krawędzi
-    const margin = 200;
-    const x = margin + Math.random() * (this.mapSize - 2 * margin);
-    const y = margin + Math.random() * (this.mapSize - 2 * margin);
+    // Określ odpowiednią strefę startową na podstawie stake
+    const stakeSol = initialStake / 1000000000; // Konwersja na SOL
+    let appropriateZone = 1; // Domyślnie Bronze
     
-    // Nowy gracz lub respawn (ale respawn nie jest już możliwy w nowej mechanice)
+    if (stakeSol >= 10) {
+      appropriateZone = 4; // Diamond Zone
+    } else if (stakeSol >= 5) {
+      appropriateZone = 3; // Gold Zone
+    } else if (stakeSol >= 1) {
+      appropriateZone = 2; // Silver Zone
+    }
+    
+    const bounds = this.getZoneBounds(appropriateZone);
+    
+    // Losowa pozycja startowa w odpowiedniej strefie
+    const margin = 200;
+    const x = bounds.minX + margin + Math.random() * (bounds.maxX - bounds.minX - 2 * margin);
+    const y = bounds.minY + margin + Math.random() * (bounds.maxY - bounds.minY - 2 * margin);
+    
+    // Nowy gracz
     player = new Player(playerAddress, x, y, nickname, initialStake);
+    player.currentZone = appropriateZone;
     this.players.set(playerAddress, player);
     this.totalSolInGame += initialStake;
     this.totalPlayersJoined++;
-    console.log(`Player ${playerAddress} joined with stake: ${initialStake} lamports`);
+    
+    console.log(`Player ${playerAddress} joined in Zone ${appropriateZone} (${this.zones[appropriateZone - 1].name}) with stake: ${stakeSol} SOL`);
     
     return player;
   }
@@ -78,7 +170,7 @@ class GameEngine {
       this.totalSolInGame -= player.solValue;
       this.totalPlayersCashedOut++;
       this.players.delete(playerAddress);
-      console.log(`Player ${playerAddress} cashed out with ${player.solValue} lamports`);
+      console.log(`Player ${playerAddress} cashed out with ${player.solValue} lamports from Zone ${player.currentZone}`);
       return player;
     } else {
       // Gracz został zjedzony - usuń go całkowicie z gry
@@ -91,9 +183,10 @@ class GameEngine {
   }
   
   convertPlayerToFood(player) {
-    // Rozdziel tylko masę gracza na jedzenie (nie SOL!)
+    // Rozdziel masę gracza na jedzenie w jego strefie
     const numFood = Math.min(Math.floor(player.mass / 20), 10);
     const foodMass = player.mass / numFood;
+    const zoneId = this.getZoneFromPosition(player.x, player.y);
     
     for (let i = 0; i < numFood; i++) {
       const angle = (Math.PI * 2 * i) / numFood;
@@ -104,6 +197,7 @@ class GameEngine {
         player.y + Math.sin(angle) * distance,
         foodMass
       );
+      food.zoneId = zoneId;
       this.food.set(food.id, food);
     }
   }
@@ -152,6 +246,7 @@ class GameEngine {
     // Nadaj prędkość wyrzuconej masie
     food.velocityX = Math.cos(angle) * 24;
     food.velocityY = Math.sin(angle) * 24;
+    food.zoneId = this.getZoneFromPosition(player.x, player.y);
     
     this.food.set(food.id, food);
   }
@@ -167,7 +262,7 @@ class GameEngine {
       this.update();
     }, 1000 / this.tickRate);
     
-    console.log('Global game engine started');
+    console.log('Global game engine started with zone system');
   }
   
   stop() {
@@ -190,7 +285,40 @@ class GameEngine {
     // Aktualizuj pozycje graczy
     for (const player of this.players.values()) {
       if (player.isAlive) {
+        const oldX = player.x;
+        const oldY = player.y;
+        const oldZone = this.getZoneFromPosition(oldX, oldY);
+        
         player.update(deltaTime, this.mapSize);
+        
+        // Sprawdź czy gracz próbuje wejść do nowej strefy
+        const newZone = this.getZoneFromPosition(player.x, player.y);
+        
+        if (newZone !== oldZone) {
+          // Sprawdź czy gracz może wejść do nowej strefy
+          if (!this.canPlayerEnterZone(player, newZone)) {
+            // Zablokuj ruch - przywróć starą pozycję
+            player.x = oldX;
+            player.y = oldY;
+            
+            // Odbij gracza od bariery
+            const bounds = this.getZoneBounds(oldZone);
+            player.x = Math.max(bounds.minX + player.radius, Math.min(bounds.maxX - player.radius, player.x));
+            player.y = Math.max(bounds.minY + player.radius, Math.min(bounds.maxY - player.radius, player.y));
+          } else {
+            // Gracz może wejść - zaktualizuj jego strefę
+            player.currentZone = newZone;
+            console.log(`Player ${player.address} entered Zone ${newZone} (${this.zones[newZone - 1].name})`);
+          }
+        }
+        
+        // Aktualizuj czy gracz może awansować do wyższej strefy
+        const appropriateZone = this.getAppropriateZoneForPlayer(player.solValue);
+        if (appropriateZone > player.currentZone) {
+          player.canAdvanceToZone = appropriateZone;
+        } else {
+          player.canAdvanceToZone = null;
+        }
       }
     }
     
@@ -208,18 +336,32 @@ class GameEngine {
         if (Math.abs(food.velocityX) < 0.1) food.velocityX = 0;
         if (Math.abs(food.velocityY) < 0.1) food.velocityY = 0;
         
-        // Granice mapy
-        food.x = Math.max(0, Math.min(this.mapSize, food.x));
-        food.y = Math.max(0, Math.min(this.mapSize, food.y));
+        // Granice strefy
+        const zoneId = food.zoneId || this.getZoneFromPosition(food.x, food.y);
+        const bounds = this.getZoneBounds(zoneId);
+        food.x = Math.max(bounds.minX, Math.min(bounds.maxX, food.x));
+        food.y = Math.max(bounds.minY, Math.min(bounds.maxY, food.y));
       }
     }
     
     // Sprawdź kolizje
     this.checkCollisions();
     
-    // Uzupełnij jedzenie
-    while (this.food.size < this.maxFood) {
-      this.spawnFood();
+    // Uzupełnij jedzenie w każdej strefie
+    for (let zoneId = 1; zoneId <= 4; zoneId++) {
+      const bounds = this.getZoneBounds(zoneId);
+      
+      // Policz jedzenie w tej strefie poprawnie
+      const foodInZone = Array.from(this.food.values()).filter(f => {
+        const foodZone = this.getZoneFromPosition(f.x, f.y);
+        return foodZone === zoneId;
+      }).length;
+      
+      // Dodaj brakujące jedzenie
+      const foodToAdd = Math.max(0, this.maxFoodPerZone - foodInZone);
+      for (let i = 0; i < foodToAdd; i++) {
+        this.spawnFoodInZone(zoneId, bounds);
+      }
     }
     
     // Aktualizuj ranking
@@ -307,6 +449,8 @@ class GameEngine {
         mass: Math.floor(player.mass),
         solValue: player.solValue,
         solDisplay: (player.solValue / 1000000000).toFixed(4), // SOL z 4 miejscami po przecinku
+        zone: player.currentZone,
+        zoneName: this.zones[player.currentZone - 1].name,
         x: player.x,
         y: player.y
       }));
@@ -317,8 +461,21 @@ class GameEngine {
     const totalValue = Array.from(this.players.values())
       .reduce((sum, p) => sum + p.solValue, 0);
     
+    // Statystyki per strefa
+    const zoneStats = {};
+    for (let i = 1; i <= 4; i++) {
+      const playersInZone = activePlayers.filter(p => p.currentZone === i);
+      zoneStats[i] = {
+        playerCount: playersInZone.length,
+        totalSol: playersInZone.reduce((sum, p) => sum + p.solValue, 0) / 1000000000
+      };
+    }
+    
     return {
       mapSize: this.mapSize,
+      zoneSize: this.zoneSize,
+      zones: this.zones,
+      zoneStats,
       isRunning: this.isRunning,
       playerCount: activePlayers.length,
       totalPlayers: this.players.size,
@@ -345,7 +502,7 @@ class GameEngine {
     }
     
     // Obszar widoczny dla gracza
-    const baseViewRadius = 400;
+    const baseViewRadius = 600;
     const viewRadius = baseViewRadius + player.radius * 3;
     
     // Filtruj obiekty w zasięgu wzroku
@@ -363,7 +520,8 @@ class GameEngine {
         isMe: p.address === playerAddress,
         isBoosting: p.isBoosting,
         solValue: p.solValue,
-        solDisplay: (p.solValue / 1000000000).toFixed(4)
+        solDisplay: (p.solValue / 1000000000).toFixed(4),
+        zone: p.currentZone
       }));
     
     const visibleFood = Array.from(this.food.values())
@@ -375,6 +533,56 @@ class GameEngine {
         radius: f.radius,
         color: f.color
       }));
+    
+    // Informacje o barierach stref
+    const currentZone = this.getZoneFromPosition(player.x, player.y);
+    const zoneBounds = this.getZoneBounds(currentZone);
+    const barriers = [];
+    
+    // Sprawdź które bariery są widoczne
+    // Górna bariera
+    if (Math.abs(player.y - zoneBounds.minY) < viewRadius && currentZone > 2) {
+      barriers.push({
+        type: 'horizontal',
+        x: zoneBounds.minX,
+        y: zoneBounds.minY,
+        width: zoneBounds.maxX - zoneBounds.minX,
+        canPass: this.canPlayerEnterZone(player, currentZone - 2)
+      });
+    }
+    
+    // Dolna bariera
+    if (Math.abs(player.y - zoneBounds.maxY) < viewRadius && currentZone < 3) {
+      barriers.push({
+        type: 'horizontal',
+        x: zoneBounds.minX,
+        y: zoneBounds.maxY,
+        width: zoneBounds.maxX - zoneBounds.minX,
+        canPass: this.canPlayerEnterZone(player, currentZone + 2)
+      });
+    }
+    
+    // Lewa bariera
+    if (Math.abs(player.x - zoneBounds.minX) < viewRadius && currentZone % 2 === 0) {
+      barriers.push({
+        type: 'vertical',
+        x: zoneBounds.minX,
+        y: zoneBounds.minY,
+        height: zoneBounds.maxY - zoneBounds.minY,
+        canPass: this.canPlayerEnterZone(player, currentZone - 1)
+      });
+    }
+    
+    // Prawa bariera
+    if (Math.abs(player.x - zoneBounds.maxX) < viewRadius && currentZone % 2 === 1) {
+      barriers.push({
+        type: 'vertical',
+        x: zoneBounds.maxX,
+        y: zoneBounds.minY,
+        height: zoneBounds.maxY - zoneBounds.minY,
+        canPass: this.canPlayerEnterZone(player, currentZone + 1)
+      });
+    }
     
     return {
       player: {
@@ -388,10 +596,16 @@ class GameEngine {
         isBoosting: player.isBoosting,
         solValue: player.solValue,
         currentValueSol: player.getCurrentValueInSol(),
-        playersEaten: player.playersEaten
+        playersEaten: player.playersEaten,
+        currentZone: player.currentZone,
+        zoneName: this.zones[player.currentZone - 1].name,
+        canAdvanceToZone: player.canAdvanceToZone
       },
       players: visiblePlayers,
       food: visibleFood,
+      barriers: barriers,
+      zones: this.zones,
+      currentZoneInfo: this.zones[currentZone - 1],
       leaderboard: this.leaderboard,
       gameState: this.getGameState()
     };
@@ -407,7 +621,8 @@ class GameEngine {
       finalValue: player.solValue,
       finalValueSol: player.getCurrentValueInSol(),
       playersEaten: player.playersEaten,
-      totalEarned: player.totalSolEarned
+      totalEarned: player.totalSolEarned,
+      finalZone: player.currentZone
     };
   }
 }

@@ -116,6 +116,39 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
         ctx.strokeRect(0, 0, gameState.mapSize, gameState.mapSize);
       }
       
+      // Rysuj bariery stref
+      if (playerView.barriers) {
+        playerView.barriers.forEach(barrier => {
+          ctx.strokeStyle = barrier.canPass ? 'rgba(0, 255, 0, 0.3)' : 'rgba(255, 0, 0, 0.5)';
+          ctx.lineWidth = 5;
+          ctx.setLineDash([10, 10]);
+          
+          ctx.beginPath();
+          if (barrier.type === 'horizontal') {
+            ctx.moveTo(barrier.x, barrier.y);
+            ctx.lineTo(barrier.x + barrier.width, barrier.y);
+          } else {
+            ctx.moveTo(barrier.x, barrier.y);
+            ctx.lineTo(barrier.x, barrier.y + barrier.height);
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
+          
+          // Rysuj tekst informacyjny o barierze
+          if (!barrier.canPass) {
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            const centerX = barrier.type === 'horizontal' ? barrier.x + barrier.width / 2 : barrier.x;
+            const centerY = barrier.type === 'vertical' ? barrier.y + barrier.height / 2 : barrier.y;
+            
+            ctx.fillText('Zone Locked - Need more SOL!', centerX, centerY);
+          }
+        });
+      }
+      
       // Rysuj jedzenie
       food.forEach(f => {
         // Cień
@@ -239,6 +272,37 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
       ctx.fillRect(minimapX, minimapY, minimapSize, minimapSize);
       
+      // Rysuj strefy na minimapie
+      if (playerView?.zones) {
+        const zoneSize = minimapSize / 2; // 2x2 grid
+        
+        // Zone 1 - Bronze (top-left)
+        ctx.fillStyle = 'rgba(205, 127, 50, 0.2)';
+        ctx.fillRect(minimapX, minimapY, zoneSize, zoneSize);
+        
+        // Zone 2 - Silver (top-right)
+        ctx.fillStyle = 'rgba(192, 192, 192, 0.2)';
+        ctx.fillRect(minimapX + zoneSize, minimapY, zoneSize, zoneSize);
+        
+        // Zone 3 - Gold (bottom-left)
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.2)';
+        ctx.fillRect(minimapX, minimapY + zoneSize, zoneSize, zoneSize);
+        
+        // Zone 4 - Diamond (bottom-right)
+        ctx.fillStyle = 'rgba(185, 242, 255, 0.2)';
+        ctx.fillRect(minimapX + zoneSize, minimapY + zoneSize, zoneSize, zoneSize);
+        
+        // Linie graniczne stref
+        ctx.strokeStyle = '#666666';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(minimapX + zoneSize, minimapY);
+        ctx.lineTo(minimapX + zoneSize, minimapY + minimapSize);
+        ctx.moveTo(minimapX, minimapY + zoneSize);
+        ctx.lineTo(minimapX + minimapSize, minimapY + zoneSize);
+        ctx.stroke();
+      }
+      
       // Obramowanie
       ctx.strokeStyle = '#000000';
       ctx.lineWidth = 2;
@@ -249,26 +313,44 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       
       // Rysuj wszystkich graczy na minimapie
       players.forEach(p => {
-        const playerMinimapX = minimapX + p.x * scale;
-        const playerMinimapY = minimapY + p.y * scale;
+        // Upewnij się, że pozycja jest w granicach mapy
+        const clampedX = Math.max(0, Math.min(gameState.mapSize, p.x));
+        const clampedY = Math.max(0, Math.min(gameState.mapSize, p.y));
+        
+        const playerMinimapX = minimapX + clampedX * scale;
+        const playerMinimapY = minimapY + clampedY * scale;
         const playerMinimapRadius = Math.max(2, p.radius * scale);
         
-        ctx.fillStyle = p.isMe ? '#FFD700' : p.color;
-        ctx.beginPath();
-        ctx.arc(playerMinimapX, playerMinimapY, playerMinimapRadius, 0, Math.PI * 2);
-        ctx.fill();
+        // Upewnij się, że gracz jest rysowany w granicach minimapy
+        if (playerMinimapX >= minimapX && playerMinimapX <= minimapX + minimapSize &&
+            playerMinimapY >= minimapY && playerMinimapY <= minimapY + minimapSize) {
+          ctx.fillStyle = p.isMe ? '#FFD700' : p.color;
+          ctx.beginPath();
+          ctx.arc(playerMinimapX, playerMinimapY, playerMinimapRadius, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Dodaj obramowanie dla własnego gracza
+          if (p.isMe) {
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+        }
       });
       
       // Obszar widoczny
       const viewSize = 1000 * scale;
+      const viewX = minimapX + player.x * scale - viewSize / 2;
+      const viewY = minimapY + player.y * scale - viewSize / 2;
+      
+      // Ogranicz obszar widoczny do granic minimapy
+      const clampedViewX = Math.max(minimapX, Math.min(minimapX + minimapSize - viewSize, viewX));
+      const clampedViewY = Math.max(minimapY, Math.min(minimapY + minimapSize - viewSize, viewY));
+      const clampedViewSize = Math.min(viewSize, minimapSize);
+      
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
       ctx.lineWidth = 1;
-      ctx.strokeRect(
-        minimapX + player.x * scale - viewSize / 2,
-        minimapY + player.y * scale - viewSize / 2,
-        viewSize,
-        viewSize
-      );
+      ctx.strokeRect(clampedViewX, clampedViewY, clampedViewSize, clampedViewSize);
     };
     
     // Rozpocznij renderowanie

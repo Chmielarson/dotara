@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { joinGlobalGame, initializeGlobalGame, checkGlobalGameState } from '../utils/SolanaTransactions';
-import Chat from './Chat';
 import './JoinGame.css';
 
 export default function JoinGame({ onJoinGame, socket }) {
@@ -18,8 +17,24 @@ export default function JoinGame({ onJoinGame, socket }) {
   const [isInitializing, setIsInitializing] = useState(false);
   const [checkingGame, setCheckingGame] = useState(true);
   
+  // Chat state
+  const [messages, setMessages] = useState([]);
+  const [inputMessage, setInputMessage] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
+  
   // Check if global game is initialized
   useEffect(() => {
+    // Disable scrolling on mount
+    const originalOverflow = document.body.style.overflow;
+    const originalPosition = document.body.style.position;
+    const originalWidth = document.body.style.width;
+    const originalHeight = document.body.style.height;
+    
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.height = '100vh';
+    
     const checkGame = async () => {
       try {
         setCheckingGame(true);
@@ -35,6 +50,14 @@ export default function JoinGame({ onJoinGame, socket }) {
     };
     
     checkGame();
+    
+    // Cleanup - restore scrolling when component unmounts
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.position = originalPosition;
+      document.body.style.width = originalWidth;
+      document.body.style.height = originalHeight;
+    };
   }, []);
   
   // Fetch game stats
@@ -56,6 +79,57 @@ export default function JoinGame({ onJoinGame, socket }) {
       return () => clearInterval(interval);
     }
   }, [gameInitialized]);
+  
+  // Chat connection
+  useEffect(() => {
+    if (!socket || !publicKey) return;
+    
+    // Join lobby
+    socket.emit('join_lobby', { playerAddress: publicKey.toString() });
+    setIsConnected(true);
+    
+    // Listen for chat history
+    socket.on('chat_history', (history) => {
+      setMessages(history);
+    });
+    
+    // Listen for new messages
+    socket.on('new_chat_message', (message) => {
+      setMessages(prev => [...prev, message]);
+    });
+    
+    return () => {
+      socket.emit('leave_lobby');
+      socket.off('chat_history');
+      socket.off('new_chat_message');
+      setIsConnected(false);
+    };
+  }, [socket, publicKey]);
+  
+  const sendMessage = (e) => {
+    e.preventDefault();
+    
+    if (!inputMessage.trim() || !socket || !isConnected || !publicKey) return;
+    
+    socket.emit('chat_message', {
+      playerAddress: publicKey.toString(),
+      message: inputMessage
+    });
+    
+    setInputMessage('');
+  };
+  
+  const formatTime = (timestamp) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+  
+  const formatAddress = (address) => {
+    return `${address.substring(0, 4)}...${address.substring(address.length - 4)}`;
+  };
   
   const handleInitializeGame = async () => {
     if (!publicKey) {
@@ -181,8 +255,99 @@ export default function JoinGame({ onJoinGame, socket }) {
   
   return (
     <div className="join-game-container">
-      <div className="join-content">
+      <div className="join-content-wrapper">
         <div className="join-left">
+          {gameStats && (
+            <div className="game-stats">
+              <h3>Live Game Stats</h3>
+              <div className="stat-item">
+                <span className="label">Active Players</span>
+                <span className="value">{gameStats.playerCount}</span>
+              </div>
+              <div className="stat-item">
+                <span className="label">Total SOL in Game</span>
+                <span className="value">{gameStats.totalSolDisplay} SOL</span>
+              </div>
+              <div className="stat-item">
+                <span className="label">Map Size</span>
+                <span className="value">{gameStats.mapSize}x{gameStats.mapSize}</span>
+              </div>
+              
+              {gameStats.zoneStats && (
+                <div className="zone-stats">
+                  <h4>Players per Zone</h4>
+                  <div className="zone-stat-item">
+                    <span>🥉 Bronze:</span>
+                    <span>{gameStats.zoneStats[1]?.playerCount || 0}</span>
+                  </div>
+                  <div className="zone-stat-item">
+                    <span>🥈 Silver:</span>
+                    <span>{gameStats.zoneStats[2]?.playerCount || 0}</span>
+                  </div>
+                  <div className="zone-stat-item">
+                    <span>🥇 Gold:</span>
+                    <span>{gameStats.zoneStats[3]?.playerCount || 0}</span>
+                  </div>
+                  <div className="zone-stat-item">
+                    <span>💎 Diamond:</span>
+                    <span>{gameStats.zoneStats[4]?.playerCount || 0}</span>
+                  </div>
+                </div>
+              )}
+              
+              {gameStats.leaderboard && gameStats.leaderboard.length > 0 && (
+                <div className="mini-leaderboard">
+                  <h4>Top Players</h4>
+                  {gameStats.leaderboard.slice(0, 5).map((player) => (
+                    <div key={player.address} className="leader-item">
+                      <span className="rank">#{player.rank}</span>
+                      <span className="name">{player.nickname}</span>
+                      <span className="sol">{player.solDisplay} SOL</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          
+          <div className="how-to-play">
+            <h3>How to Play</h3>
+            <ul>
+              <li>
+                <span className="icon">🎮</span>
+                <div>
+                  <strong>Move</strong> with your mouse
+                </div>
+              </li>
+              <li>
+                <span className="icon">🍕</span>
+                <div>
+                  <strong>Eat food</strong> to grow bigger (adds mass only)
+                </div>
+              </li>
+              <li>
+                <span className="icon">💰</span>
+                <div>
+                  <strong>Eat players</strong> to steal their SOL + gain mass
+                </div>
+              </li>
+              <li>
+                <span className="icon">🚀</span>
+                <div>
+                  <strong>Space</strong> to boost (costs 10% mass)
+                </div>
+              </li>
+              <li>
+                <span className="icon">💸</span>
+                <div>
+                  <strong>Cash out</strong> anytime to claim your SOL
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+        
+        <div className="join-middle">
           <div className="join-box">
             <h1>Join the Global Arena</h1>
             <p className="subtitle">Eat, grow, and earn SOL!</p>
@@ -250,81 +415,62 @@ export default function JoinGame({ onJoinGame, socket }) {
               </button>
             </div>
           </div>
-          
-          <div className="how-to-play">
-            <h3>How to Play</h3>
-            <ul>
-              <li>
-                <span className="icon">🎮</span>
-                <div>
-                  <strong>Move</strong> with your mouse
-                </div>
-              </li>
-              <li>
-                <span className="icon">🍕</span>
-                <div>
-                  <strong>Eat food</strong> to grow bigger (adds mass only)
-                </div>
-              </li>
-              <li>
-                <span className="icon">💰</span>
-                <div>
-                  <strong>Eat players</strong> to steal their SOL + gain mass
-                </div>
-              </li>
-              <li>
-                <span className="icon">🚀</span>
-                <div>
-                  <strong>Space</strong> to boost (costs 10% mass)
-                </div>
-              </li>
-              <li>
-                <span className="icon">💸</span>
-                <div>
-                  <strong>Cash out</strong> anytime to claim your SOL
-                </div>
-              </li>
-            </ul>
-          </div>
         </div>
         
         <div className="join-right">
-          {gameStats && (
-            <div className="game-stats">
-              <h3>Live Game Stats</h3>
-              <div className="stat-item">
-                <span className="label">Active Players</span>
-                <span className="value">{gameStats.playerCount}</span>
+          <div className="static-chat-container">
+            <div className="chat-header">
+              <h3>Global Chat</h3>
+              <div className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
+                {isConnected ? '● Online' : '○ Offline'}
               </div>
-              <div className="stat-item">
-                <span className="label">Total SOL in Game</span>
-                <span className="value">{gameStats.totalSolDisplay} SOL</span>
-              </div>
-              <div className="stat-item">
-                <span className="label">Map Size</span>
-                <span className="value">{gameStats.mapSize}x{gameStats.mapSize}</span>
-              </div>
-              
-              {gameStats.leaderboard && gameStats.leaderboard.length > 0 && (
-                <div className="mini-leaderboard">
-                  <h4>Top Players</h4>
-                  {gameStats.leaderboard.slice(0, 5).map((player) => (
-                    <div key={player.address} className="leader-item">
-                      <span className="rank">#{player.rank}</span>
-                      <span className="name">{player.nickname}</span>
-                      <span className="sol">{player.solDisplay} SOL</span>
-                    </div>
-                  ))}
+            </div>
+            
+            <div className="chat-messages">
+              {messages.length === 0 ? (
+                <div className="no-messages">
+                  <p>No messages yet. Say hello!</p>
                 </div>
+              ) : (
+                messages.map((msg) => (
+                  <div 
+                    key={msg.id} 
+                    className={`chat-message ${msg.playerAddress === publicKey?.toString() ? 'own-message' : ''}`}
+                  >
+                    <div className="message-header">
+                      <span className="message-author">
+                        {formatAddress(msg.playerAddress)}
+                        {msg.playerAddress === publicKey?.toString() && ' (You)'}
+                      </span>
+                      <span className="message-time">{formatTime(msg.timestamp)}</span>
+                    </div>
+                    <div className="message-content">{msg.message}</div>
+                  </div>
+                ))
               )}
             </div>
-          )}
+            
+            <form className="chat-input-form" onSubmit={sendMessage}>
+              <input
+                type="text"
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                placeholder={isConnected ? "Type a message..." : "Connect wallet to chat"}
+                maxLength={200}
+                disabled={!isConnected || !publicKey}
+                className="chat-input"
+              />
+              <button 
+                type="submit" 
+                disabled={!isConnected || !inputMessage.trim() || !publicKey}
+                className="chat-send-btn"
+              >
+                Send
+              </button>
+            </form>
+          </div>
         </div>
       </div>
-      
-      {publicKey && socket && (
-        <Chat socket={socket} playerAddress={publicKey.toString()} />
-      )}
     </div>
   );
 }

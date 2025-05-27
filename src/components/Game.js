@@ -301,6 +301,13 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
               <div key={player.address} className="leaderboard-item">
                 <span className="rank">{player.rank}.</span>
                 <span className="nickname">{player.nickname}</span>
+                <span className="zone-badge" style={{ 
+                  color: player.zone === 1 ? '#CD7F32' : 
+                         player.zone === 2 ? '#C0C0C0' : 
+                         player.zone === 3 ? '#FFD700' : '#B9F2FF' 
+                }}>
+                  Z{player.zone}
+                </span>
                 <span className="sol">{player.solDisplay} SOL</span>
               </div>
             ))}
@@ -320,15 +327,19 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
                 <span className="value">{Math.floor(playerView.player.mass)}</span>
               </div>
               <div className="info-item">
+                <span>Zone:</span>
+                <span className="value">{playerView.player.zoneName}</span>
+              </div>
+              <div className="info-item">
                 <span>Players Eaten:</span>
                 <span className="value">{playerView.player.playersEaten || 0}</span>
               </div>
-              <div className="info-item">
-                <span>Position:</span>
-                <span className="value">
-                  {Math.floor(playerView.player.x)}, {Math.floor(playerView.player.y)}
-                </span>
-              </div>
+              {playerView.player.canAdvanceToZone && (
+                <div className="info-item" style={{ color: '#16A085' }}>
+                  <span>Can advance to:</span>
+                  <span className="value">Zone {playerView.player.canAdvanceToZone}</span>
+                </div>
+              )}
             </div>
           )}
           

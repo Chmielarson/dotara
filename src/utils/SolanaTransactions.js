@@ -20,7 +20,7 @@ const GAME_SERVER_URL = 'http://localhost:3001';
 console.log('Using game server URL:', GAME_SERVER_URL);
 
 // Program ID - ZAKTUALIZUJ PO DEPLOYU!
-const PROGRAM_ID = new PublicKey('7rw6uErfMmgnwZWs3UReFGc1aBtbM152WkV8kudY9aMd');
+const PROGRAM_ID = new PublicKey('HG7rKQwr8NNkPeeEw2scXFatS7wrqQDEbH6Cr4ZUQRkw');
 const PLATFORM_FEE_WALLET = new PublicKey('FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8');
 
 console.log('Solana configuration loaded:', {

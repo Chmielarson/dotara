@@ -142,7 +142,11 @@ globalGame.onPlayerEaten = async (eaterAddress, eatenAddress, eatenValue) => {
 
 globalGame.start();
 
-console.log('Global game started:', globalGame.isRunning);
+console.log('Global game started with zone system:', {
+  isRunning: globalGame.isRunning,
+  mapSize: globalGame.mapSize,
+  zones: globalGame.zones.length
+});
 
 // Przechowywanie połączeń graczy
 const playerSockets = new Map(); // playerAddress -> socketId
@@ -250,7 +254,9 @@ app.get('/api/admin/active-players', (req, res) => {
     solDisplay: (p.solValue / 1000000000).toFixed(4),
     isAlive: p.isAlive,
     mass: Math.floor(p.mass),
-    position: `${Math.floor(p.x)}, ${Math.floor(p.y)}`
+    position: `${Math.floor(p.x)}, ${Math.floor(p.y)}`,
+    currentZone: p.currentZone,
+    zoneName: globalGame.zones[p.currentZone - 1].name
   }));
   
   res.json({
@@ -407,7 +413,8 @@ function broadcastGameState() {
     console.log(`Broadcasting to ${broadcastCount} players, game state:`, {
       activePlayers: gameState.playerCount,
       totalPlayers: playerSockets.size,
-      foodCount: gameState.foodCount
+      foodCount: gameState.foodCount,
+      zoneStats: gameState.zoneStats
     });
   }
 }
@@ -422,7 +429,8 @@ setInterval(() => {
     activePlayers: stats.playerCount,
     totalPlayers: stats.totalPlayers,
     totalSolInGame: stats.totalSolDisplay,
-    foodCount: stats.foodCount
+    foodCount: stats.foodCount,
+    zones: stats.zoneStats
   });
 }, 60000);
 
@@ -433,5 +441,5 @@ server.listen(PORT, () => {
   console.log(`Connected to Solana ${SOLANA_NETWORK}`);
   console.log(`Program ID: ${PROGRAM_ID.toString()}`);
   console.log(`Server wallet: ${serverWallet ? serverWallet.publicKey.toString() : 'not configured'}`);
-  console.log('Global game is active and running!');
+  console.log('Global game is active with zone system!');
 });
