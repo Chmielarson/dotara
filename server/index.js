@@ -41,6 +41,8 @@ const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 const globalGame = new GameEngine();
 globalGame.start();
 
+console.log('Global game started:', globalGame.isRunning);
+
 // Przechowywanie połączeń graczy
 const playerSockets = new Map(); // playerAddress -> socketId
 const socketPlayers = new Map(); // socketId -> { playerAddress, nickname }
@@ -65,7 +67,7 @@ app.post('/api/game/join', async (req, res) => {
   try {
     const { playerAddress, initialStake, transactionSignature } = req.body;
     
-    console.log('Player joining game:', {
+    console.log('Player joining game via API:', {
       playerAddress,
       initialStake,
       transactionSignature
@@ -172,15 +174,34 @@ io.on('connection', (socket) => {
   
   // Game handlers
   socket.on('join_game', ({ playerAddress, nickname, initialStake }) => {
+    console.log('Join game request:', { playerAddress, nickname, initialStake });
+    
     // Zapisz mapowanie
     playerSockets.set(playerAddress, socket.id);
     socketPlayers.set(socket.id, { playerAddress, nickname });
+    
+    console.log('Socket mappings:', {
+      playerSockets: playerSockets.size,
+      socketId: socket.id,
+      playerAddress
+    });
     
     // Dołącz do globalnej gry
     socket.join('game');
     
     // Dodaj gracza do gry
     const player = globalGame.addPlayer(playerAddress, nickname, initialStake);
+    
+    console.log('Player added to game:', {
+      playerExists: !!player,
+      isAlive: player?.isAlive,
+      position: player ? `${player.x}, ${player.y}` : 'N/A'
+    });
+    
+    console.log('Global game state:', {
+      totalPlayers: globalGame.players.size,
+      activePlayers: Array.from(globalGame.players.values()).filter(p => p.isAlive).length
+    });
     
     console.log(`Player ${playerAddress} (${nickname}) joined game with stake: ${initialStake}`);
     
@@ -239,28 +260,43 @@ io.on('connection', (socket) => {
 function broadcastGameState() {
   const gameState = globalGame.getGameState();
   
+  // Log co sekundę
+  if (Date.now() % 1000 < 50) {
+    console.log(`Broadcasting - Players: ${playerSockets.size}, Game running: ${globalGame.isRunning}`);
+  }
+  
   // Wyślij globalny stan do wszystkich
   io.to('game').emit('game_state', gameState);
   
   // Wyślij spersonalizowany widok każdemu graczowi
+  let sentCount = 0;
   for (const [playerAddress, player] of globalGame.players) {
     const socketId = playerSockets.get(playerAddress);
     
     if (socketId) {
       const playerView = globalGame.getPlayerView(playerAddress);
-      io.to(socketId).emit('player_view', playerView);
       
-      // Jeśli gracz został zjedzony ale jeszcze o tym nie wie
-      if (!player.isAlive && player.lastDeathNotification !== true) {
-        io.to(socketId).emit('player_eliminated', {
-          playerAddress,
-          canRespawn: player.solValue > 0,
-          currentValue: player.solValue,
-          currentValueSol: player.getCurrentValueInSol()
-        });
-        player.lastDeathNotification = true;
+      if (!playerView) {
+        console.error(`No player view for ${playerAddress}`);
+        continue;
+      }
+      
+      io.to(socketId).emit('player_view', playerView);
+      sentCount++;
+      
+      // Log raz na sekundę
+      if (Date.now() % 1000 < 50) {
+        console.log(`Sent view to ${playerAddress.substring(0, 8)}...`);
+      }
+    } else {
+      if (Date.now() % 5000 < 50) { // Co 5 sekund
+        console.log(`No socket for player ${playerAddress.substring(0, 8)}...`);
       }
     }
+  }
+  
+  if (Date.now() % 1000 < 50 && sentCount > 0) {
+    console.log(`Broadcast complete - sent ${sentCount} views`);
   }
   
   // Sprawdź czy były jakieś zjedzenia graczy i zaktualizuj blockchain

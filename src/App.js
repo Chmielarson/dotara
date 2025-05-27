@@ -6,8 +6,8 @@ import { PhantomWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { WalletModalProvider, WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { clusterApiUrl } from '@solana/web3.js';
 import { useWallet } from '@solana/wallet-adapter-react';
-import JoinGame from './components/JoinGame';
-import Game from './components/Game';
+import JoinGame from './components/JoinGame';  // <- Sprawdź to
+import Game from './components/Game';          // <- I to
 import './App.css';
 import '@solana/wallet-adapter-react-ui/styles.css';
 import io from 'socket.io-client';

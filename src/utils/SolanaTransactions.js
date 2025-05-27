@@ -8,7 +8,6 @@ import {
   clusterApiUrl,
   TransactionInstruction
 } from '@solana/web3.js';
-import io from 'socket.io-client';
 import { Buffer } from 'buffer';
 
 // Konfiguracja
@@ -20,8 +19,8 @@ const GAME_SERVER_URL = 'http://localhost:3001';
 
 console.log('Using game server URL:', GAME_SERVER_URL);
 
-// Program ID
-const PROGRAM_ID = new PublicKey('5vGU3fqNat5z6v7MHMT7Zb9v9Q788geefMXUsSCszQ6M');
+// Program ID - ZAKTUALIZUJ PO DEPLOYU!
+const PROGRAM_ID = new PublicKey('7rw6uErfMmgnwZWs3UReFGc1aBtbM152WkV8kudY9aMd');
 const PLATFORM_FEE_WALLET = new PublicKey('FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8');
 
 console.log('Solana configuration loaded:', {
@@ -79,6 +78,87 @@ async function findPlayerStatePDA(playerPubkey) {
 
 // ========== API FUNCTIONS ==========
 
+// Sprawdź czy gracz już jest w grze
+export async function checkPlayerState(wallet) {
+  const { publicKey } = wallet;
+  if (!publicKey) return null;
+  
+  const [playerStatePDA] = await findPlayerStatePDA(publicKey);
+  
+  try {
+    const accountInfo = await connection.getAccountInfo(playerStatePDA);
+    if (!accountInfo) {
+      console.log('No player state account found');
+      return null;
+    }
+    
+    // Parsuj dane (uproszczone)
+    // PlayerState structure:
+    // pubkey: 32 bytes (0-31)
+    // stake_amount: 8 bytes (32-39)
+    // current_value: 8 bytes (40-47)
+    // is_active: 1 byte (48)
+    // joined_at: 8 bytes (49-56)
+    // last_cashout: 8 bytes (57-64)
+    // total_earned: 8 bytes (65-72)
+    
+    const isActive = accountInfo.data[48] === 1;
+    const currentValue = accountInfo.data.readBigUInt64LE(40);
+    const stakeAmount = accountInfo.data.readBigUInt64LE(32);
+    
+    console.log('Player state found:', {
+      isActive,
+      currentValue: Number(currentValue) / LAMPORTS_PER_SOL,
+      stakeAmount: Number(stakeAmount) / LAMPORTS_PER_SOL
+    });
+    
+    return {
+      exists: true,
+      isActive,
+      currentValue: Number(currentValue) / LAMPORTS_PER_SOL,
+      stakeAmount: Number(stakeAmount) / LAMPORTS_PER_SOL
+    };
+  } catch (error) {
+    console.error('Error checking player state:', error);
+    return null;
+  }
+}
+
+// Sprawdź stan globalnej gry
+export async function checkGlobalGameState() {
+  const [gamePDA] = await findGlobalGamePDA();
+  
+  try {
+    const accountInfo = await connection.getAccountInfo(gamePDA);
+    if (!accountInfo) {
+      console.log('Global game account not found');
+      return { initialized: false };
+    }
+    
+    console.log('Global game account:', {
+      owner: accountInfo.owner.toString(),
+      lamports: accountInfo.lamports,
+      dataLength: accountInfo.data.length,
+      expectedProgramId: PROGRAM_ID.toString()
+    });
+    
+    // Sprawdź czy konto należy do naszego programu
+    if (!accountInfo.owner.equals(PROGRAM_ID)) {
+      console.error('Game account owned by wrong program!');
+      return { initialized: false, error: 'Wrong program owner' };
+    }
+    
+    return { 
+      initialized: true,
+      lamports: accountInfo.lamports,
+      dataLength: accountInfo.data.length
+    };
+  } catch (error) {
+    console.error('Error checking game state:', error);
+    return { initialized: false, error: error.message };
+  }
+}
+
 // Inicjalizacja globalnej gry (tylko raz, przez admina)
 export async function initializeGlobalGame(wallet) {
   const { publicKey, signTransaction } = wallet;
@@ -132,13 +212,20 @@ export async function joinGlobalGame(stakeAmount, wallet) {
   
   if (!publicKey) throw new Error('Wallet not connected');
   
+  // Sprawdź stan gracza przed próbą dołączenia
+  const playerState = await checkPlayerState(wallet);
+  if (playerState?.isActive) {
+    throw new Error('You are already active in the game. Please cash out first.');
+  }
+  
   const [gamePDA] = await findGlobalGamePDA();
   const [playerStatePDA] = await findPlayerStatePDA(publicKey);
   
   console.log('Joining global game:', {
     stakeAmount,
     gamePDA: gamePDA.toString(),
-    playerStatePDA: playerStatePDA.toString()
+    playerStatePDA: playerStatePDA.toString(),
+    existingPlayer: playerState?.exists
   });
   
   const data = serializeJoinGameData(stakeAmount);
@@ -185,7 +272,8 @@ export async function joinGlobalGame(stakeAmount, wallet) {
   });
   
   if (!response.ok) {
-    throw new Error('Failed to register with game server');
+    const errorData = await response.json();
+    throw new Error(errorData.error || 'Failed to register with game server');
   }
   
   return {
@@ -264,10 +352,13 @@ export async function cashOut(wallet) {
     throw new Error('Player state not found');
   }
   
-  // Parsuj wartość gracza (uproszczone - w prawdziwej aplikacji użyj Borsh)
-  // Zakładamy że current_value jest na pozycji 40-48 (po pubkey i stake_amount)
+  // Parsuj wartość gracza
   const currentValue = playerStateAccount.data.readBigUInt64LE(40);
   const currentValueSol = Number(currentValue) / LAMPORTS_PER_SOL;
+  
+  if (currentValue === 0n) {
+    throw new Error('You have no SOL to cash out');
+  }
   
   console.log('Cashing out:', {
     currentValue: currentValue.toString(),
@@ -302,14 +393,22 @@ export async function cashOut(wallet) {
   }, 'confirmed');
   
   // Powiadom serwer
-  await fetch(`${GAME_SERVER_URL}/api/game/cashout`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      playerAddress: publicKey.toString(),
-      transactionSignature: signature
-    })
-  });
+  try {
+    const response = await fetch(`${GAME_SERVER_URL}/api/game/cashout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playerAddress: publicKey.toString(),
+        transactionSignature: signature
+      })
+    });
+    
+    if (!response.ok) {
+      console.error('Server notification failed, but transaction succeeded');
+    }
+  } catch (error) {
+    console.error('Failed to notify server:', error);
+  }
   
   const platformFee = currentValueSol * 0.05;
   const playerReceived = currentValueSol * 0.95;
@@ -323,14 +422,5 @@ export async function cashOut(wallet) {
   };
 }
 
-// Połączenie z serwerem gry
-export function connectToGameServer() {
-  const socket = io(GAME_SERVER_URL, {
-    reconnection: true,
-    reconnectionAttempts: 5,
-    reconnectionDelay: 1000,
-    transports: ['websocket', 'polling']
-  });
-  
-  return socket;
-}
+// Export connection dla innych komponentów jeśli potrzebują
+export { connection, PROGRAM_ID };

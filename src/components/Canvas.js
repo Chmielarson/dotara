@@ -6,7 +6,10 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
   const gridPatternRef = useRef();
   
   useEffect(() => {
-    if (!ref.current) return;
+    if (!ref.current) {
+      console.error('No canvas ref!');
+      return;
+    }
     
     const canvas = ref.current;
     const ctx = canvas.getContext('2d');
@@ -73,6 +76,9 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
       if (!playerView || !playerView.player) {
+        ctx.fillStyle = '#000000';
+        ctx.font = '20px Arial';
+        ctx.fillText('Waiting for player data...', 100, 130);
         animationRef.current = requestAnimationFrame(render);
         return;
       }

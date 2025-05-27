@@ -5,7 +5,7 @@ use solana_program::{
     msg,
     program_error::ProgramError,
     pubkey::Pubkey,
-    program::invoke,
+    program::{invoke, invoke_signed},
     system_instruction,
     sysvar::{rent::Rent, Sysvar, clock::Clock},
 };
@@ -42,7 +42,7 @@ pub struct GlobalGame {
 }
 
 impl GlobalGame {
-    pub const SIZE: usize = 512; // Rezerwujemy miejsce na przyszłe rozszerzenia
+    pub const SIZE: usize = 256; // Zmniejszone z 512 na 256
     pub const HEADER_SIZE: usize = 4;
     pub const MAX_PLAYERS: usize = 1000; // Maksymalna liczba graczy
     
@@ -212,7 +212,7 @@ fn process_initialize_game(
             game_account.clone(),
             system_program.clone(),
         ],
-        &[&[b"global_game", &[bump_seed]]],
+        &[&[b"global_game".as_ref(), &[bump_seed]]],
     )?;
     
     // Inicjalizuj dane gry
@@ -262,15 +262,33 @@ fn process_join_game(
         return Err(ProgramError::InvalidArgument);
     }
     
-    // Jeśli gracz już ma konto, sprawdź czy jest nieaktywny
+    // Sprawdź czy gracz już ma konto
+    let mut is_rejoining = false;
+    let mut existing_value = 0u64;
+    
     if !player_state_account.data_is_empty() {
-        let player_state = PlayerState::try_from_slice(&player_state_account.data.borrow())?;
+        // Gracz już ma konto - sprawdź stan
+        let mut player_state = PlayerState::try_from_slice(&player_state_account.data.borrow())?;
+        
         if player_state.is_active {
+            msg!("Player is already active in the game");
             return Err(ProgramError::AccountAlreadyInitialized);
         }
-        // Gracz może ponownie dołączyć jeśli jest nieaktywny
+        
+        // Gracz może ponownie dołączyć
+        is_rejoining = true;
+        existing_value = player_state.current_value;
+        
+        // Aktualizuj stan gracza
+        player_state.is_active = true;
+        player_state.stake_amount += stake_amount;
+        player_state.current_value += stake_amount;
+        player_state.joined_at = Clock::get()?.unix_timestamp;
+        
+        // Zapisz zaktualizowany stan
+        player_state.serialize(&mut &mut player_state_account.data.borrow_mut()[..])?;
     } else {
-        // Utwórz nowe konto dla gracza
+        // Nowy gracz - utwórz konto
         let rent = Rent::from_account_info(rent_account)?;
         let space = PlayerState::SIZE;
         let lamports = rent.minimum_balance(space);
@@ -288,8 +306,21 @@ fn process_join_game(
                 player_state_account.clone(),
                 system_program.clone(),
             ],
-            &[&[b"player_state", player_account.key.as_ref(), &[bump_seed]]],
+            &[&[b"player_state".as_ref(), player_account.key.as_ref(), &[bump_seed]]],
         )?;
+        
+        // Utwórz nowy stan gracza
+        let player_state = PlayerState {
+            pubkey: *player_account.key,
+            stake_amount,
+            current_value: stake_amount,
+            is_active: true,
+            joined_at: Clock::get()?.unix_timestamp,
+            last_cashout: 0,
+            total_earned: 0,
+        };
+        
+        player_state.serialize(&mut &mut player_state_account.data.borrow_mut()[..])?;
     }
     
     // Transfer stawki do puli gry
@@ -306,36 +337,31 @@ fn process_join_game(
         ],
     )?;
     
-    // Utwórz stan gracza
-    let clock = Clock::get()?;
-    let player_state = PlayerState {
-        pubkey: *player_account.key,
-        stake_amount,
-        current_value: stake_amount,
-        is_active: true,
-        joined_at: clock.unix_timestamp,
-        last_cashout: 0,
-        total_earned: 0,
-    };
-    
-    player_state.serialize(&mut &mut player_state_account.data.borrow_mut()[..])?;
-    
     // Zaktualizuj dane gry
     game.total_pool += stake_amount;
-    game.active_players += 1;
-    game.total_players += 1;
+    if !is_rejoining {
+        game.active_players += 1;
+        game.total_players += 1;
+    } else {
+        game.active_players += 1;
+        msg!("Player rejoining with existing value: {} + new stake: {} = total: {}", 
+             existing_value, stake_amount, existing_value + stake_amount);
+    }
     
     game.to_account_data(&mut game_account.data.borrow_mut())?;
     
-    msg!("Player {} joined with stake: {} lamports", player_account.key, stake_amount);
+    msg!("Player {} {} with stake: {} lamports", 
+         player_account.key, 
+         if is_rejoining { "rejoined" } else { "joined" },
+         stake_amount);
     Ok(())
 }
 
 fn process_update_player_value(
-    program_id: &Pubkey,
+    _program_id: &Pubkey,
     accounts: &[AccountInfo],
-    player: Pubkey,
-    eaten_player: Pubkey,
+    _player: Pubkey,
+    _eaten_player: Pubkey,
     eaten_value: u64,
 ) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
@@ -373,12 +399,12 @@ fn process_update_player_value(
     game.active_players = game.active_players.saturating_sub(1);
     game.to_account_data(&mut game_account.data.borrow_mut())?;
     
-    msg!("Player {} gained {} lamports from eating {}", player, eaten_value, eaten_player);
+    msg!("Player gained {} lamports from eating another player", eaten_value);
     Ok(())
 }
 
 fn process_cash_out(
-    program_id: &Pubkey,
+    _program_id: &Pubkey,
     accounts: &[AccountInfo],
 ) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();

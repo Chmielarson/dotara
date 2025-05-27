@@ -9,6 +9,15 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   const wallet = useWallet();
   const { publicKey } = wallet;
   
+  // Dodaj logi na początku
+  console.log('Game component mounted with:', {
+    initialStake,
+    nickname,
+    socket: socket ? 'Socket exists' : 'No socket',
+    socketConnected: socket?.connected,
+    publicKey: publicKey?.toString()
+  });
+  
   const [gameState, setGameState] = useState(null);
   const [playerView, setPlayerView] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -18,6 +27,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   const [isCashingOut, setIsCashingOut] = useState(false);
   const [showCashOutModal, setShowCashOutModal] = useState(false);
   const [playerJoined, setPlayerJoined] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('Initializing...'); // Ten useState brakowało!
   
   const canvasRef = useRef(null);
   const inputRef = useRef({
@@ -48,7 +58,22 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   
   // Connect to game
   useEffect(() => {
-    if (!socket || !publicKey || playerJoined) return;
+    if (!socket || !publicKey || playerJoined) {
+      console.log('Skipping join - conditions not met:', { 
+        socket: !!socket, 
+        publicKey: !!publicKey, 
+        playerJoined 
+      });
+      return;
+    }
+    
+    setConnectionStatus('Connecting to game server...');
+    
+    console.log('Emitting join_game with:', {
+      playerAddress: publicKey.toString(),
+      nickname: nickname,
+      initialStake: initialStake
+    });
     
     socket.emit('join_game', {
       playerAddress: publicKey.toString(),
@@ -57,21 +82,32 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     });
     
     socket.on('joined_game', (data) => {
+      console.log('Received joined_game:', data);
       if (data.success) {
         setIsConnected(true);
         setPlayerJoined(true);
-        console.log('Joined game successfully');
+        setConnectionStatus('Connected! Waiting for game data...');
+      } else {
+        setConnectionStatus('Failed to join game');
       }
     });
     
     socket.on('game_state', (state) => {
+      console.log('Received game_state');
       setGameState(state);
     });
     
     socket.on('player_view', (view) => {
+      console.log('Received player_view:', {
+        hasPlayer: !!view?.player,
+        playerAlive: view?.player?.isAlive,
+        playerPos: view?.player ? `${view.player.x}, ${view.player.y}` : 'N/A',
+        foodCount: view?.food?.length,
+        playersCount: view?.players?.length
+      });
       setPlayerView(view);
+      setConnectionStatus('In game');
       
-      // Check if player is dead
       if (view.player && !view.player.isAlive) {
         setIsPlayerDead(true);
         setCanRespawn(view.canRespawn);
@@ -92,8 +128,19 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
       onLeaveGame();
     });
     
+    socket.on('connect', () => {
+      console.log('Socket connected');
+      setConnectionStatus('Socket connected');
+    });
+    
+    socket.on('disconnect', () => {
+      console.log('Socket disconnected');
+      setConnectionStatus('Disconnected from server');
+    });
+    
     socket.on('error', (error) => {
-      console.error('Game error:', error);
+      console.error('Socket error:', error);
+      setConnectionStatus('Connection error: ' + error.message);
     });
     
     return () => {
@@ -103,6 +150,8 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
       socket.off('player_eliminated');
       socket.off('cash_out_result');
       socket.off('error');
+      socket.off('connect');
+      socket.off('disconnect');
     };
   }, [socket, publicKey, nickname, initialStake, playerJoined, onLeaveGame]);
   
@@ -236,8 +285,44 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     return (lamports / 1000000000).toFixed(4);
   };
   
+  // Add useEffect to check canvas ref
+  useEffect(() => {
+    console.log('Canvas ref status:', { 
+      hasRef: !!canvasRef.current,
+      element: canvasRef.current 
+    });
+  }, []);
+  
   return (
     <div className="game-container">
+      {/* Debug info - usuń po naprawieniu */}
+      <div style={{
+        position: 'absolute',
+        top: '10px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        background: 'rgba(0,0,0,0.8)',
+        color: 'white',
+        padding: '10px',
+        borderRadius: '5px',
+        zIndex: 1000,
+        fontSize: '12px'
+      }}>
+        <div>Status: {connectionStatus}</div>
+        <div>Socket: {socket ? 'Yes' : 'No'}</div>
+        <div>Connected: {socket?.connected ? 'Yes' : 'No'}</div>
+        <div>Player joined: {playerJoined ? 'Yes' : 'No'}</div>
+        <div>Has view: {playerView ? 'Yes' : 'No'}</div>
+        <div>Canvas ref: {canvasRef.current ? 'Yes' : 'No'}</div>
+        <div>Player view: {playerView ? 'Yes' : 'No'}</div>
+        {playerView && (
+          <>
+            <div>Player pos: {Math.floor(playerView.player?.x)}, {Math.floor(playerView.player?.y)}</div>
+            <div>Player alive: {playerView.player?.isAlive ? 'Yes' : 'No'}</div>
+          </>
+        )}
+      </div>
+      
       {/* Game UI */}
       <div className="game-ui">
         {/* Leaderboard */}
