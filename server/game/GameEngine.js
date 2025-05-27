@@ -12,7 +12,7 @@ class GameEngine {
     this.physics = new Physics();
     this.isRunning = false;
     this.lastUpdate = Date.now();
-    this.tickRate = 120; // 60 FPS
+    this.tickRate = 60; // 60 FPS
     this.gameLoop = null;
     this.leaderboard = [];
     
@@ -115,6 +115,15 @@ class GameEngine {
   updatePlayer(playerAddress, input) {
     const player = this.players.get(playerAddress);
     if (!player || !player.isAlive) return;
+    
+    // Debug log
+    if (Date.now() % 1000 < 50) {
+      console.log(`Updating player ${playerAddress.substring(0, 8)} with target:`, {
+        mouseX: input.mouseX?.toFixed(0),
+        mouseY: input.mouseY?.toFixed(0),
+        currentPos: { x: player.x.toFixed(0), y: player.y.toFixed(0) }
+      });
+    }
     
     // Aktualizuj kierunek ruchu gracza
     if (input.mouseX !== undefined && input.mouseY !== undefined) {
@@ -227,7 +236,6 @@ class GameEngine {
   
   checkCollisions() {
     const players = Array.from(this.players.values()).filter(p => p.isAlive);
-    const playersToUpdate = [];
     
     // Kolizje gracz-jedzenie
     for (const player of players) {
@@ -261,26 +269,14 @@ class GameEngine {
             console.log(`Player ${player1.address} is eating player ${player2.address}`);
             player1.eatPlayer(player2);
             this.removePlayer(player2.address, false);
-            playersToUpdate.push({
-              eater: player1.address,
-              eaten: player2.address,
-              eatenValue: player2.solValue
-            });
           } else if (player2.radius > player1.radius * 1.1) {
             console.log(`Player ${player2.address} is eating player ${player1.address}`);
             player2.eatPlayer(player1);
             this.removePlayer(player1.address, false);
-            playersToUpdate.push({
-              eater: player2.address,
-              eaten: player1.address,
-              eatenValue: player1.solValue
-            });
           }
         }
       }
     }
-    
-    return playersToUpdate;
   }
   
   updateLeaderboard() {
@@ -327,8 +323,15 @@ class GameEngine {
   }
   
   getPlayerView(playerAddress) {
+    console.log(`Getting player view for ${playerAddress.substring(0, 8)}`);
+    
     const player = this.players.get(playerAddress);
-    if (!player) return null;
+    if (!player) {
+      console.error(`Player not found: ${playerAddress}`);
+      return null;
+    }
+    
+    console.log(`Player found: alive=${player.isAlive}, pos=${player.x},${player.y}`);
     
     // Jeśli gracz nie żyje, zwróć specjalny widok
     if (!player.isAlive) {
@@ -382,6 +385,8 @@ class GameEngine {
         radius: f.radius,
         color: f.color
       }));
+    
+    console.log(`Player view generated: ${visiblePlayers.length} players, ${visibleFood.length} food`);
     
     return {
       player: {

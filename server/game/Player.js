@@ -68,6 +68,13 @@ class Player {
   setTarget(x, y) {
     this.targetX = x;
     this.targetY = y;
+    
+    // Debug log
+    console.log(`Player ${this.address.substring(0, 8)} target set to:`, {
+      x: x.toFixed(0),
+      y: y.toFixed(0),
+      currentPos: { x: this.x.toFixed(0), y: this.y.toFixed(0) }
+    });
   }
   
   update(deltaTime, mapSize) {
@@ -106,6 +113,17 @@ class Player {
       // Aktualizuj pozycję
       this.x += this.velocityX * deltaTime * 60;
       this.y += this.velocityY * deltaTime * 60;
+      
+      // Debug log co sekundę
+      if (Date.now() % 1000 < 50) {
+        console.log(`Player ${this.address.substring(0, 8)} moving:`, {
+          from: { x: (this.x - this.velocityX * deltaTime * 60).toFixed(0), y: (this.y - this.velocityY * deltaTime * 60).toFixed(0) },
+          to: { x: this.x.toFixed(0), y: this.y.toFixed(0) },
+          target: { x: this.targetX.toFixed(0), y: this.targetY.toFixed(0) },
+          speed: speed.toFixed(2),
+          distance: distance.toFixed(0)
+        });
+      }
       
       // Ograniczenia mapy
       const mapMargin = this.radius * 0.3;

@@ -98,13 +98,17 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     });
     
     socket.on('player_view', (view) => {
-      console.log('Received player_view:', {
-        hasPlayer: !!view?.player,
-        playerAlive: view?.player?.isAlive,
-        playerPos: view?.player ? `${view.player.x}, ${view.player.y}` : 'N/A',
-        foodCount: view?.food?.length,
-        playersCount: view?.players?.length
-      });
+      // Log tylko co sekundę żeby nie zaśmiecać konsoli
+      if (Date.now() % 1000 < 50) {
+        console.log('Received player_view:', {
+          hasPlayer: !!view?.player,
+          playerAlive: view?.player?.isAlive,
+          playerPos: view?.player ? `${Math.floor(view.player.x)}, ${Math.floor(view.player.y)}` : 'N/A',
+          foodCount: view?.food?.length,
+          playersCount: view?.players?.length
+        });
+      }
+      
       setPlayerView(view);
       setConnectionStatus('In game');
       
@@ -160,9 +164,21 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     if (!socket || !isConnected || !playerJoined) return;
     
     const sendInput = () => {
+      const currentInput = {
+        mouseX: inputRef.current.mouseX,
+        mouseY: inputRef.current.mouseY,
+        split: inputRef.current.split,
+        eject: inputRef.current.eject
+      };
+      
+      // Debug log co sekundę
+      if (Date.now() % 1000 < 33) {
+        console.log('Sending input:', currentInput);
+      }
+      
       socket.emit('player_input', {
         playerAddress: publicKey.toString(),
-        input: inputRef.current
+        input: currentInput
       });
       
       // Reset one-time actions
@@ -203,6 +219,14 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
       
       inputRef.current.mouseX = worldX;
       inputRef.current.mouseY = worldY;
+      
+      // Debug log
+      console.log('Mouse input:', {
+        screen: { x, y },
+        world: { x: worldX, y: worldY },
+        player: { x: playerView.player.x, y: playerView.player.y },
+        zoom: zoomLevel
+      });
     }
   }, [playerView, isPlayerDead]);
   
@@ -306,7 +330,9 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
         padding: '10px',
         borderRadius: '5px',
         zIndex: 1000,
-        fontSize: '12px'
+        fontSize: '12px',
+        maxWidth: '400px',
+        wordWrap: 'break-word'
       }}>
         <div>Status: {connectionStatus}</div>
         <div>Socket: {socket ? 'Yes' : 'No'}</div>
@@ -314,11 +340,13 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
         <div>Player joined: {playerJoined ? 'Yes' : 'No'}</div>
         <div>Has view: {playerView ? 'Yes' : 'No'}</div>
         <div>Canvas ref: {canvasRef.current ? 'Yes' : 'No'}</div>
-        <div>Player view: {playerView ? 'Yes' : 'No'}</div>
         {playerView && (
           <>
             <div>Player pos: {Math.floor(playerView.player?.x)}, {Math.floor(playerView.player?.y)}</div>
             <div>Player alive: {playerView.player?.isAlive ? 'Yes' : 'No'}</div>
+            <div>Food count: {playerView.food?.length}</div>
+            <div>Players count: {playerView.players?.length}</div>
+            <div>Time: {new Date().toLocaleTimeString()}</div>
           </>
         )}
       </div>

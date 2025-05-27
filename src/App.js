@@ -27,7 +27,7 @@ function AppContent() {
   
   // Initialize socket.io
   useEffect(() => {
-    const GAME_SERVER_URL = process.env.REACT_APP_GAME_SERVER_URL || 'http://localhost:3001';
+    const GAME_SERVER_URL = import.meta.env.VITE_GAME_SERVER_URL || 'http://localhost:3001';
     const newSocket = io(GAME_SERVER_URL, {
       reconnection: true,
       reconnectionAttempts: 5,

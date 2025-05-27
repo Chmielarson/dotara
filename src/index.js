@@ -19,14 +19,5 @@ import { Buffer } from 'buffer';
 window.Buffer = Buffer;
 window.global = window;
 
-// Disable React StrictMode for production-like behavior
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
-
-// Performance measuring (optional)
-// import reportWebVitals from './reportWebVitals';
-// reportWebVitals(console.log);
+root.render(<App />);

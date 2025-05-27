@@ -33,7 +33,7 @@ const io = new Server(server, {
 // Konfiguracja Solana
 const SOLANA_NETWORK = process.env.SOLANA_NETWORK || 'devnet';
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || clusterApiUrl(SOLANA_NETWORK);
-const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || 'EhP1ossEJvx2hrRWhbsQDUVoUoFbWGjap3uxZsjMaknH');
+const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || '7rw6uErfMmgnwZWs3UReFGc1aBtbM152WkV8kudY9aMd');
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
@@ -210,6 +210,15 @@ io.on('connection', (socket) => {
       success: true,
       player: player.toJSON()
     });
+    
+    // Natychmiast wyślij widok gracza
+    const playerView = globalGame.getPlayerView(playerAddress);
+    if (playerView) {
+      console.log('Sending immediate player view to', playerAddress.substring(0, 8));
+      socket.emit('player_view', playerView);
+    } else {
+      console.error('Could not generate player view for', playerAddress);
+    }
   });
   
   socket.on('respawn', ({ playerAddress }) => {
@@ -224,6 +233,17 @@ io.on('connection', (socket) => {
   
   socket.on('player_input', (data) => {
     const { playerAddress, input } = data;
+    
+    // Debug log co sekundę
+    if (Date.now() % 1000 < 50) {
+      console.log(`Input from ${playerAddress.substring(0, 8)}:`, {
+        mouseX: input.mouseX?.toFixed(0),
+        mouseY: input.mouseY?.toFixed(0),
+        split: input.split,
+        eject: input.eject
+      });
+    }
+    
     globalGame.updatePlayer(playerAddress, input);
   });
   
@@ -270,40 +290,25 @@ function broadcastGameState() {
   
   // Wyślij spersonalizowany widok każdemu graczowi
   let sentCount = 0;
-  for (const [playerAddress, player] of globalGame.players) {
-    const socketId = playerSockets.get(playerAddress);
+  for (const [playerAddress, socketId] of playerSockets) {
+    const playerView = globalGame.getPlayerView(playerAddress);
     
-    if (socketId) {
-      const playerView = globalGame.getPlayerView(playerAddress);
-      
-      if (!playerView) {
-        console.error(`No player view for ${playerAddress}`);
-        continue;
-      }
-      
-      io.to(socketId).emit('player_view', playerView);
-      sentCount++;
-      
-      // Log raz na sekundę
-      if (Date.now() % 1000 < 50) {
-        console.log(`Sent view to ${playerAddress.substring(0, 8)}...`);
-      }
-    } else {
-      if (Date.now() % 5000 < 50) { // Co 5 sekund
-        console.log(`No socket for player ${playerAddress.substring(0, 8)}...`);
-      }
+    if (!playerView) {
+      console.error(`No player view for ${playerAddress}`);
+      continue;
+    }
+    
+    io.to(socketId).emit('player_view', playerView);
+    sentCount++;
+    
+    // Log raz na sekundę
+    if (Date.now() % 1000 < 50) {
+      console.log(`Sent view to ${playerAddress.substring(0, 8)}...`);
     }
   }
   
   if (Date.now() % 1000 < 50 && sentCount > 0) {
     console.log(`Broadcast complete - sent ${sentCount} views`);
-  }
-  
-  // Sprawdź czy były jakieś zjedzenia graczy i zaktualizuj blockchain
-  const collisionUpdates = globalGame.checkCollisions();
-  for (const update of collisionUpdates) {
-    // TODO: Wywołaj aktualizację na blockchainie
-    console.log('Player value update needed:', update);
   }
 }
 

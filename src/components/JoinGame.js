@@ -19,7 +19,8 @@ export default function JoinGame({ onJoinGame, socket }) {
   useEffect(() => {
     const fetchGameStats = async () => {
       try {
-        const response = await fetch(`${process.env.REACT_APP_GAME_SERVER_URL || 'http://localhost:3001'}/api/game/status`);
+        const GAME_SERVER_URL = import.meta.env.VITE_GAME_SERVER_URL || 'http://localhost:3001';
+        const response = await fetch(`${GAME_SERVER_URL}/api/game/status`);
         const data = await response.json();
         setGameStats(data);
       } catch (error) {
