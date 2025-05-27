@@ -20,4 +20,5 @@ window.Buffer = Buffer;
 window.global = window;
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
+// Removed React.StrictMode to prevent double rendering
 root.render(<App />);

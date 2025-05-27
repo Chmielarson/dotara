@@ -1,13 +1,13 @@
 // src/App.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { PhantomWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { WalletModalProvider, WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { clusterApiUrl } from '@solana/web3.js';
 import { useWallet } from '@solana/wallet-adapter-react';
-import JoinGame from './components/JoinGame';  // <- Sprawdź to
-import Game from './components/Game';          // <- I to
+import JoinGame from './components/JoinGame';
+import Game from './components/Game';
 import './App.css';
 import '@solana/wallet-adapter-react-ui/styles.css';
 import io from 'socket.io-client';
@@ -21,25 +21,24 @@ function AppContent() {
   const { publicKey } = wallet;
   
   const [currentView, setCurrentView] = useState('join'); // 'join' lub 'game'
-  const [socket, setSocket] = useState(null);
   const [playerStake, setPlayerStake] = useState(0);
   const [playerNickname, setPlayerNickname] = useState('');
   
-  // Initialize socket.io
-  useEffect(() => {
+  // Initialize socket.io - use useMemo to prevent reconnection on every render
+  const socket = useMemo(() => {
     const GAME_SERVER_URL = import.meta.env.VITE_GAME_SERVER_URL || 'http://localhost:3001';
-    const newSocket = io(GAME_SERVER_URL, {
+    return io(GAME_SERVER_URL, {
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
     });
-    
-    setSocket(newSocket);
-    
-    return () => {
-      newSocket.disconnect();
-    };
   }, []);
+  
+  useEffect(() => {
+    return () => {
+      socket.disconnect();
+    };
+  }, [socket]);
   
   // Check if user was in game before refresh
   useEffect(() => {
@@ -107,6 +106,7 @@ function AppContent() {
         
         {currentView === 'game' && (
           <Game 
+            key={`game-${publicKey?.toString()}-${playerStake}`} // Add key to prevent re-mounting
             initialStake={playerStake}
             nickname={playerNickname}
             onLeaveGame={handleLeaveGame}

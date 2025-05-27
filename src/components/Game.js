@@ -36,6 +36,20 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     split: false,
     eject: false
   });
+  const mouseInitialized = useRef(false);
+  
+  // Initialize mouse position when player data is received
+  useEffect(() => {
+    if (playerView?.player && !mouseInitialized.current) {
+      inputRef.current.mouseX = playerView.player.x;
+      inputRef.current.mouseY = playerView.player.y;
+      mouseInitialized.current = true;
+      console.log('Initialized mouse position to player position:', {
+        x: playerView.player.x,
+        y: playerView.player.y
+      });
+    }
+  }, [playerView]);
   
   // Zapobiegaj przewijaniu strony podczas gry
   useEffect(() => {
@@ -107,6 +121,12 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
           foodCount: view?.food?.length,
           playersCount: view?.players?.length
         });
+        
+        // Sprawdź strukturę danych graczy
+        if (view?.players && view.players.length > 0) {
+          console.log('First player data:', view.players[0]);
+          console.log('My player in players array:', view.players.find(p => p.isMe));
+        }
       }
       
       setPlayerView(view);
@@ -161,7 +181,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   
   // Send player input
   useEffect(() => {
-    if (!socket || !isConnected || !playerJoined) return;
+    if (!socket || !isConnected || !playerJoined || !publicKey) return;
     
     const sendInput = () => {
       const currentInput = {
@@ -171,11 +191,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
         eject: inputRef.current.eject
       };
       
-      // Debug log co sekundę
-      if (Date.now() % 1000 < 33) {
-        console.log('Sending input:', currentInput);
-      }
-      
+      // Zawsze wysyłaj input, nawet jeśli to te same współrzędne
       socket.emit('player_input', {
         playerAddress: publicKey.toString(),
         input: currentInput
@@ -207,26 +223,23 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
       const centerX = canvas.width / 2;
       const centerY = canvas.height / 2;
       
-      // Calculate zoom level
-      const screenSize = Math.min(canvas.width, canvas.height);
-      const baseZoom = screenSize / 800;
-      const playerZoom = Math.max(0.8, Math.min(1.5, 100 / (playerView.player.radius * 0.3 + 50)));
-      const zoomLevel = baseZoom * playerZoom;
+      // Simple world coordinates - no zoom for now
+      const worldX = playerView.player.x + (x - centerX);
+      const worldY = playerView.player.y + (y - centerY);
       
-      // Calculate position in game world
-      const worldX = playerView.player.x + (x - centerX) / zoomLevel;
-      const worldY = playerView.player.y + (y - centerY) / zoomLevel;
+      // WAŻNE: Upewnij się, że to są liczby, nie stringi!
+      inputRef.current.mouseX = parseFloat(worldX);
+      inputRef.current.mouseY = parseFloat(worldY);
       
-      inputRef.current.mouseX = worldX;
-      inputRef.current.mouseY = worldY;
-      
-      // Debug log
-      console.log('Mouse input:', {
-        screen: { x, y },
-        world: { x: worldX, y: worldY },
-        player: { x: playerView.player.x, y: playerView.player.y },
-        zoom: zoomLevel
-      });
+      // Debug log only occasionally
+      if (Date.now() % 500 < 16) {
+        console.log('Mouse input:', {
+          screen: { x: x.toFixed(0), y: y.toFixed(0) },
+          world: { x: worldX.toFixed(0), y: worldY.toFixed(0) },
+          player: { x: playerView.player.x.toFixed(0), y: playerView.player.y.toFixed(0) },
+          type: { mouseX: typeof inputRef.current.mouseX, mouseY: typeof inputRef.current.mouseY }
+        });
+      }
     }
   }, [playerView, isPlayerDead]);
   
@@ -319,38 +332,6 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   
   return (
     <div className="game-container">
-      {/* Debug info - usuń po naprawieniu */}
-      <div style={{
-        position: 'absolute',
-        top: '10px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        background: 'rgba(0,0,0,0.8)',
-        color: 'white',
-        padding: '10px',
-        borderRadius: '5px',
-        zIndex: 1000,
-        fontSize: '12px',
-        maxWidth: '400px',
-        wordWrap: 'break-word'
-      }}>
-        <div>Status: {connectionStatus}</div>
-        <div>Socket: {socket ? 'Yes' : 'No'}</div>
-        <div>Connected: {socket?.connected ? 'Yes' : 'No'}</div>
-        <div>Player joined: {playerJoined ? 'Yes' : 'No'}</div>
-        <div>Has view: {playerView ? 'Yes' : 'No'}</div>
-        <div>Canvas ref: {canvasRef.current ? 'Yes' : 'No'}</div>
-        {playerView && (
-          <>
-            <div>Player pos: {Math.floor(playerView.player?.x)}, {Math.floor(playerView.player?.y)}</div>
-            <div>Player alive: {playerView.player?.isAlive ? 'Yes' : 'No'}</div>
-            <div>Food count: {playerView.food?.length}</div>
-            <div>Players count: {playerView.players?.length}</div>
-            <div>Time: {new Date().toLocaleTimeString()}</div>
-          </>
-        )}
-      </div>
-      
       {/* Game UI */}
       <div className="game-ui">
         {/* Leaderboard */}

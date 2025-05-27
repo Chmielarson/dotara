@@ -116,18 +116,16 @@ class GameEngine {
     const player = this.players.get(playerAddress);
     if (!player || !player.isAlive) return;
     
-    // Debug log
-    if (Date.now() % 1000 < 50) {
-      console.log(`Updating player ${playerAddress.substring(0, 8)} with target:`, {
-        mouseX: input.mouseX?.toFixed(0),
-        mouseY: input.mouseY?.toFixed(0),
-        currentPos: { x: player.x.toFixed(0), y: player.y.toFixed(0) }
-      });
-    }
-    
-    // Aktualizuj kierunek ruchu gracza
+    // Upewnij się, że współrzędne są liczbami
     if (input.mouseX !== undefined && input.mouseY !== undefined) {
-      player.setTarget(input.mouseX, input.mouseY);
+      const mouseX = parseFloat(input.mouseX);
+      const mouseY = parseFloat(input.mouseY);
+      
+      if (!isNaN(mouseX) && !isNaN(mouseY)) {
+        player.setTarget(mouseX, mouseY);
+      } else {
+        console.error(`Invalid mouse coordinates from ${playerAddress}: mouseX=${input.mouseX}, mouseY=${input.mouseY}`);
+      }
     }
     
     // Obsługa podziału (space) - boost
@@ -323,15 +321,10 @@ class GameEngine {
   }
   
   getPlayerView(playerAddress) {
-    console.log(`Getting player view for ${playerAddress.substring(0, 8)}`);
-    
     const player = this.players.get(playerAddress);
     if (!player) {
-      console.error(`Player not found: ${playerAddress}`);
       return null;
     }
-    
-    console.log(`Player found: alive=${player.isAlive}, pos=${player.x},${player.y}`);
     
     // Jeśli gracz nie żyje, zwróć specjalny widok
     if (!player.isAlive) {
@@ -386,10 +379,9 @@ class GameEngine {
         color: f.color
       }));
     
-    console.log(`Player view generated: ${visiblePlayers.length} players, ${visibleFood.length} food`);
-    
     return {
       player: {
+        address: player.address,
         x: player.x,
         y: player.y,
         radius: player.radius,

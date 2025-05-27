@@ -280,16 +280,10 @@ io.on('connection', (socket) => {
 function broadcastGameState() {
   const gameState = globalGame.getGameState();
   
-  // Log co sekundę
-  if (Date.now() % 1000 < 50) {
-    console.log(`Broadcasting - Players: ${playerSockets.size}, Game running: ${globalGame.isRunning}`);
-  }
-  
   // Wyślij globalny stan do wszystkich
   io.to('game').emit('game_state', gameState);
   
   // Wyślij spersonalizowany widok każdemu graczowi
-  let sentCount = 0;
   for (const [playerAddress, socketId] of playerSockets) {
     const playerView = globalGame.getPlayerView(playerAddress);
     
@@ -299,21 +293,11 @@ function broadcastGameState() {
     }
     
     io.to(socketId).emit('player_view', playerView);
-    sentCount++;
-    
-    // Log raz na sekundę
-    if (Date.now() % 1000 < 50) {
-      console.log(`Sent view to ${playerAddress.substring(0, 8)}...`);
-    }
-  }
-  
-  if (Date.now() % 1000 < 50 && sentCount > 0) {
-    console.log(`Broadcast complete - sent ${sentCount} views`);
   }
 }
 
-// Broadcast co 50ms (20 FPS dla klientów)
-setInterval(broadcastGameState, 50);
+// Broadcast co 33ms (30 FPS dla klientów)
+setInterval(broadcastGameState, 33);
 
 // Statystyki gry co minutę
 setInterval(() => {
