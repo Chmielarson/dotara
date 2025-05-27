@@ -350,6 +350,7 @@ class GameEngine {
         radius: p.radius,
         color: p.color,
         nickname: p.nickname,
+        mass: p.mass,
         isMe: p.address === playerAddress,
         isBoosting: p.isBoosting
       }));

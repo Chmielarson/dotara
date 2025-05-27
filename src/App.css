@@ -284,3 +284,8 @@
   transform: translate(-2px, -2px) !important;
   box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.1) !important;
 }
+
+/* Ukryj header podczas gry */
+body.game-active .app-header {
+  display: none;
+}

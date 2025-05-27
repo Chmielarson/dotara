@@ -46,6 +46,10 @@ const socketPlayers = new Map(); // socketId -> { playerAddress, roomId }
 const endedGames = new Set(); // Set do śledzenia zakończonych gier
 const pendingPlayers = new Map(); // playerAddress -> { roomId, socketId } - gracze czekający na nick
 
+// Globalny chat
+const chatMessages = [];
+const MAX_CHAT_MESSAGES = 100; // Przechowuj tylko ostatnie 100 wiadomości
+
 // API Routes
 app.get('/api/rooms', (req, res) => {
   const rooms = Array.from(activeRooms.values())
@@ -371,6 +375,39 @@ app.get('/health', (req, res) => {
 // Socket.IO handlers
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
+  
+  socket.on('join_lobby', ({ playerAddress }) => {
+    console.log(`Player ${playerAddress} joined lobby`);
+    socket.join('lobby');
+    
+    // Wyślij ostatnie wiadomości
+    socket.emit('chat_history', chatMessages);
+  });
+  
+  socket.on('leave_lobby', () => {
+    socket.leave('lobby');
+  });
+  
+  socket.on('chat_message', ({ playerAddress, message }) => {
+    if (!message || message.trim().length === 0) return;
+    
+    const chatMessage = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      playerAddress,
+      message: message.trim().substring(0, 200), // Ogranicz długość wiadomości
+      timestamp: new Date().toISOString()
+    };
+    
+    chatMessages.push(chatMessage);
+    
+    // Utrzymuj tylko ostatnie MAX_CHAT_MESSAGES wiadomości
+    if (chatMessages.length > MAX_CHAT_MESSAGES) {
+      chatMessages.shift();
+    }
+    
+    // Wyślij do wszystkich w lobby
+    io.to('lobby').emit('new_chat_message', chatMessage);
+  });
   
   socket.on('join_game', ({ roomId, playerAddress }) => {
     const game = games.get(roomId);

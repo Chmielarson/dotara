@@ -74,9 +74,9 @@ class Player {
       // Minimalna prędkość
       speed = Math.max(speed, this.baseSpeed * 0.3);
       
-      // Jeśli boost jest aktywny, znacząco zwiększ prędkość
+      // Jeśli boost jest aktywny, zwiększ prędkość
       if (this.isBoosting) {
-        speed *= 10; // 10x szybciej podczas boosta przy bardzo niskiej bazowej prędkości
+        speed *= 3; // 3x szybciej podczas boosta
       }
       
       // Aktualizuj prędkość
@@ -131,9 +131,9 @@ class Player {
     this.mass -= boostCost;
     this.updateRadius();
     
-    // Aktywuj boost na 1 sekundę (zmniejszone z 2)
+    // Aktywuj boost na 1.5 sekundy
     this.isBoosting = true;
-    this.boostEndTime = Date.now() + 1000; // 1 sekunda
+    this.boostEndTime = Date.now() + 1500; // 1.5 sekundy
     
     this.lastSplitTime = Date.now();
     return true;

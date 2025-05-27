@@ -201,7 +201,7 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
         ctx.fillStyle = '#FFFFFF';
         ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.lineWidth = 2;
-        const massText = Math.floor(p.radius * p.radius / 25);
+        const massText = Math.floor(p.mass || (p.radius * p.radius / 25));
         ctx.strokeText(massText, p.x, p.y + p.radius / 3);
         ctx.fillText(massText, p.x, p.y + p.radius / 3);
       });

@@ -357,21 +357,25 @@ export default function Game({ roomId, roomInfo, onBack }) {
   if (showNicknameInput) {
     return (
       <div className="nickname-screen">
-        <h2>Choose your name</h2>
-        <input
-          type="text"
-          placeholder="Enter nickname..."
-          value={nickname}
-          onChange={(e) => setNickname(e.target.value)}
-          maxLength={20}
-          onKeyPress={(e) => e.key === 'Enter' && handleSetNickname()}
-          autoFocus
-        />
-        <button onClick={() => handleSetNickname()}>Start game</button>
-        <button onClick={onBack} className="back-btn">Back</button>
-        <p style={{ marginTop: '20px', color: '#95A5A6', fontSize: '14px' }}>
-          Game will start automatically in {timeLeft} seconds...
-        </p>
+        <div className="nickname-container">
+          <h2>Choose your name</h2>
+          <input
+            type="text"
+            placeholder="Enter nickname..."
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+            maxLength={20}
+            onKeyPress={(e) => e.key === 'Enter' && handleSetNickname()}
+            autoFocus
+          />
+          <div className="button-group">
+            <button onClick={() => handleSetNickname()}>Start game</button>
+            <button onClick={onBack} className="back-btn">Back</button>
+          </div>
+          <p className="timer-info">
+            Game will start automatically in {timeLeft} seconds...
+          </p>
+        </div>
       </div>
     );
   }
@@ -480,7 +484,7 @@ export default function Game({ roomId, roomInfo, onBack }) {
               <>
                 <h2>You lost</h2>
                 <p>Winner: {winner?.substring(0, 8)}...</p>
-                <button onClick={onBack}>Back to lobby</button>
+                <button onClick={onBack} className="back-btn">Back to lobby</button>
               </>
             )}
             
