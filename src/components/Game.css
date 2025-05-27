@@ -82,6 +82,13 @@
   font-weight: bold;
 }
 
+.sol {
+  color: #16A085;
+  font-weight: bold;
+  min-width: 80px;
+  text-align: right;
+}
+
 .game-info {
   position: absolute;
   top: 20px;
@@ -149,8 +156,7 @@
 .exit-btn {
   position: absolute;
   bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 20px;
   background: #E74C3C;
   color: white;
   border: 3px solid #C0392B;
@@ -174,6 +180,8 @@
   transform: translate(0, 0);
   box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.1);
 }
+
+.nickname-screen {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -426,4 +434,262 @@
 .game-over-content .back-btn:hover {
   transform: translate(-3px, -3px);
   box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
+}
+
+/* Dodatkowe style dla nowego systemu */
+.player-info {
+  position: absolute;
+  top: 20px;
+  left: 240px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 3px solid #E74C3C;
+  border-radius: 15px;
+  padding: 20px;
+  color: #333;
+  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.1);
+  min-width: 200px;
+}
+
+.player-info .info-item {
+  display: flex;
+  justify-content: space-between;
+  margin: 8px 0;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.player-info .info-item span:first-child {
+  color: #7F8C8D;
+}
+
+.player-info .info-item .value {
+  color: #2C3E50;
+}
+
+.player-info .info-item .sol-value {
+  color: #16A085;
+  font-size: 18px;
+}
+
+.cash-out-btn {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #16A085;
+  color: white;
+  border: 3px solid #138871;
+  padding: 16px 32px;
+  border-radius: 25px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 18px;
+  transition: all 0.2s;
+  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.1);
+  font-family: 'SF Pro Display', -apple-system, sans-serif;
+  z-index: 15;
+}
+
+.cash-out-btn:hover:not(:disabled) {
+  transform: translate(-3px, -3px);
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
+}
+
+.cash-out-btn:disabled {
+  background: #BDC3C7;
+  border-color: #95A5A6;
+  color: #7F8C8D;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.death-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.death-content {
+  background: white;
+  border: 4px solid #E74C3C;
+  border-radius: 20px;
+  padding: 40px;
+  text-align: center;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
+}
+
+.death-content h1 {
+  margin: 0 0 20px 0;
+  font-size: 36px;
+  color: #E74C3C;
+  font-weight: 700;
+}
+
+.death-content p {
+  font-size: 18px;
+  color: #34495E;
+  margin: 15px 0;
+  font-weight: 700;
+}
+
+.death-options {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  margin-top: 30px;
+}
+
+.respawn-btn,
+.cash-out-death-btn,
+.leave-btn {
+  padding: 16px 32px;
+  border-radius: 25px;
+  font-size: 18px;
+  cursor: pointer;
+  font-weight: 700;
+  transition: all 0.2s;
+  font-family: 'SF Pro Display', -apple-system, sans-serif;
+  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.1);
+  border: none;
+}
+
+.respawn-btn {
+  background: #16A085;
+  color: white;
+  border: 4px solid #138871;
+}
+
+.cash-out-death-btn {
+  background: #F39C12;
+  color: white;
+  border: 4px solid #D68910;
+}
+
+.leave-btn {
+  background: #ECF0F1;
+  color: #34495E;
+  border: 4px solid #BDC3C7;
+}
+
+.respawn-btn:hover,
+.cash-out-death-btn:hover,
+.leave-btn:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
+}
+
+.modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.modal-content {
+  background: white;
+  border: 4px solid #16A085;
+  border-radius: 20px;
+  padding: 40px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.1);
+}
+
+.modal-content h2 {
+  margin: 0 0 25px 0;
+  color: #16A085;
+  font-size: 28px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.cash-out-info {
+  background: #ECF0F1;
+  border: 3px solid #34495E;
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 25px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #2C3E50;
+}
+
+.info-row.highlight {
+  color: #16A085;
+  font-size: 18px;
+  padding-top: 15px;
+  border-top: 2px solid #BDC3C7;
+  margin-top: 5px;
+}
+
+.warning {
+  color: #E74C3C;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+  margin: 20px 0;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+}
+
+.modal-buttons button {
+  padding: 14px 28px;
+  border-radius: 20px;
+  font-size: 16px;
+  cursor: pointer;
+  font-weight: 700;
+  transition: all 0.2s;
+  font-family: 'SF Pro Display', -apple-system, sans-serif;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.1);
+  border: none;
+}
+
+.cancel-btn {
+  background: #ECF0F1;
+  color: #34495E;
+  border: 3px solid #BDC3C7;
+}
+
+.confirm-btn {
+  background: #16A085;
+  color: white;
+  border: 3px solid #138871;
+}
+
+.modal-buttons button:hover:not(:disabled) {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.1);
+}
+
+.modal-buttons button:disabled {
+  background: #BDC3C7;
+  border-color: #95A5A6;
+  color: #7F8C8D;
+  cursor: not-allowed;
+  opacity: 0.7;
 }

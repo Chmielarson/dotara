@@ -15,14 +15,13 @@ import { Buffer } from 'buffer';
 const NETWORK = 'devnet';
 const connection = new Connection(clusterApiUrl(NETWORK), 'confirmed');
 
-// Hardcoded URL - zmień jeśli serwer działa na innym porcie
+// Hardcoded URL
 const GAME_SERVER_URL = 'http://localhost:3001';
 
 console.log('Using game server URL:', GAME_SERVER_URL);
 
-// Twój Program ID
+// Program ID
 const PROGRAM_ID = new PublicKey('5vGU3fqNat5z6v7MHMT7Zb9v9Q788geefMXUsSCszQ6M');
-const SYSVAR_RENT_PUBKEY = new PublicKey('SysvarRent111111111111111111111111111111111');
 const PLATFORM_FEE_WALLET = new PublicKey('FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8');
 
 console.log('Solana configuration loaded:', {
@@ -31,190 +30,131 @@ console.log('Solana configuration loaded:', {
   GAME_SERVER_URL
 });
 
-let socket = null;
-
 // ========== SERIALIZACJA DANYCH ==========
 
-function serializeCreateRoomData(maxPlayers, entryFee, roomSlot, gameDuration, mapSize) {
-  // 1 + 1 + 8 + 1 + 2 + 2 = 15 bajtów
-  const buffer = Buffer.alloc(15);
-  
-  buffer.writeUInt8(0, 0); // CreateRoom instruction
-  buffer.writeUInt8(maxPlayers, 1);
-  const lamportsAmount = Math.floor(entryFee * LAMPORTS_PER_SOL);
-  buffer.writeBigUInt64LE(BigInt(lamportsAmount), 2);
-  buffer.writeUInt8(roomSlot, 10);
-  buffer.writeUInt16LE(gameDuration, 11);
-  buffer.writeUInt16LE(mapSize, 13);
-  
-  return buffer;
-}
-
-function serializeJoinRoomData() {
+function serializeInitializeGameData() {
   const buffer = Buffer.alloc(1);
-  buffer.writeUInt8(1, 0); // JoinRoom instruction
+  buffer.writeUInt8(0, 0); // InitializeGame instruction
   return buffer;
 }
 
-function serializeStartGameData(gameId) {
-  const gameIdBytes = Buffer.from(gameId, 'utf8');
-  const buffer = Buffer.alloc(1 + 4 + gameIdBytes.length);
-  
-  buffer.writeUInt8(2, 0); // StartGame instruction
-  buffer.writeUInt32LE(gameIdBytes.length, 1);
-  gameIdBytes.copy(buffer, 5);
-  
+function serializeJoinGameData(stakeAmount) {
+  const buffer = Buffer.alloc(1 + 8);
+  buffer.writeUInt8(1, 0); // JoinGame instruction
+  const lamportsAmount = Math.floor(stakeAmount * LAMPORTS_PER_SOL);
+  buffer.writeBigUInt64LE(BigInt(lamportsAmount), 1);
   return buffer;
 }
 
-function serializeEndGameData(winnerPubkey) {
-  const buffer = Buffer.alloc(1 + 32);
-  buffer.writeUInt8(4, 0); // EndGame instruction
-  winnerPubkey.toBuffer().copy(buffer, 1);
+function serializeUpdatePlayerValueData(player, eatenPlayer, eatenValue) {
+  const buffer = Buffer.alloc(1 + 32 + 32 + 8);
+  buffer.writeUInt8(2, 0); // UpdatePlayerValue instruction
+  player.toBuffer().copy(buffer, 1);
+  eatenPlayer.toBuffer().copy(buffer, 33);
+  buffer.writeBigUInt64LE(BigInt(eatenValue), 65);
   return buffer;
 }
 
-function serializeClaimPrizeData() {
+function serializeCashOutData() {
   const buffer = Buffer.alloc(1);
-  buffer.writeUInt8(5, 0); // ClaimPrize instruction
+  buffer.writeUInt8(3, 0); // CashOut instruction
   return buffer;
 }
 
 // ========== FUNKCJE POMOCNICZE ==========
 
-async function findGamePDA(creatorPubkey, roomSlot = 0) {
+async function findGlobalGamePDA() {
   return await PublicKey.findProgramAddress(
-    [Buffer.from('solana_io'), creatorPubkey.toBuffer(), Buffer.from([roomSlot])],
+    [Buffer.from('global_game')],
     PROGRAM_ID
   );
 }
 
-function initializeSocket() {
-  if (socket && socket.connected) return socket;
-  
-  if (!socket) {
-    socket = io(GAME_SERVER_URL, {
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-      transports: ['websocket', 'polling']
-    });
-    
-    socket.on('connect', () => {
-      console.log('Connected to game server');
-    });
-    
-    socket.on('disconnect', () => {
-      console.log('Disconnected from game server');
-    });
-  }
-  
-  if (!socket.connected) {
-    socket.connect();
-  }
-  
-  return socket;
+async function findPlayerStatePDA(playerPubkey) {
+  return await PublicKey.findProgramAddress(
+    [Buffer.from('player_state'), playerPubkey.toBuffer()],
+    PROGRAM_ID
+  );
 }
 
 // ========== API FUNCTIONS ==========
 
-export async function getRooms() {
-  const response = await fetch(`${GAME_SERVER_URL}/api/rooms`);
-  if (!response.ok) throw new Error('Failed to fetch rooms');
-  return response.json();
-}
-
-export function getRoomsUpdates(callback) {
-  const socket = initializeSocket();
-  
-  socket.off('rooms_update');
-  socket.on('rooms_update', callback);
-  socket.emit('get_rooms');
-  
-  return () => socket.off('rooms_update');
-}
-
-// Zmień funkcję createRoom w src/utils/SolanaTransactions.js
-
-export async function createRoom(maxPlayers, entryFee, mapSize, gameDuration, wallet) {
+// Inicjalizacja globalnej gry (tylko raz, przez admina)
+export async function initializeGlobalGame(wallet) {
   const { publicKey, signTransaction } = wallet;
   
   if (!publicKey) throw new Error('Wallet not connected');
   
-  // Znajdź wolny slot - zwiększamy limit do 50 (maksimum w smart kontrakcie)
-  let roomSlot = 0;
-  let gamePDA = null;
+  const [gamePDA] = await findGlobalGamePDA();
   
-  // Sprawdzamy losowe sloty zamiast sekwencyjnie
-  const maxAttempts = 50;
-  let attempts = 0;
-  
-  while (attempts < maxAttempts) {
-    // Losowy slot od 0 do 49
-    roomSlot = Math.floor(Math.random() * 50);
-    const [pda] = await findGamePDA(publicKey, roomSlot);
-    
-    try {
-      const accountInfo = await connection.getAccountInfo(pda);
-      if (!accountInfo) {
-        gamePDA = pda;
-        break;
-      }
-    } catch {
-      gamePDA = pda;
-      break;
-    }
-    
-    attempts++;
+  // Sprawdź czy gra już istnieje
+  const accountInfo = await connection.getAccountInfo(gamePDA);
+  if (accountInfo) {
+    console.log('Global game already initialized');
+    return { alreadyInitialized: true };
   }
   
-  // Jeśli nie znaleziono losowo, szukaj sekwencyjnie
-  if (!gamePDA) {
-    for (let slot = 0; slot < 50; slot++) {
-      const [pda] = await findGamePDA(publicKey, slot);
-      
-      try {
-        const accountInfo = await connection.getAccountInfo(pda);
-        if (!accountInfo) {
-          roomSlot = slot;
-          gamePDA = pda;
-          break;
-        }
-      } catch {
-        roomSlot = slot;
-        gamePDA = pda;
-        break;
-      }
-    }
-  }
+  const data = serializeInitializeGameData();
   
-  if (!gamePDA) throw new Error('All room slots are occupied. Please try again later or cancel an existing room.');
-  
-  console.log('Creating room:', {
-    roomSlot,
-    gamePDA: gamePDA.toString(),
-    maxPlayers,
-    entryFee,
-    mapSize,
-    gameDuration
-  });
-  
-  // Serializuj dane
-  const data = serializeCreateRoomData(maxPlayers, entryFee, roomSlot, gameDuration, mapSize);
-  
-  // Utwórz instrukcję
   const instruction = new TransactionInstruction({
     keys: [
       { pubkey: publicKey, isSigner: true, isWritable: true },
       { pubkey: gamePDA, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey('SysvarRent111111111111111111111111111111111'), isSigner: false, isWritable: false },
     ],
     programId: PROGRAM_ID,
     data: data
   });
   
-  // Utwórz i wyślij transakcję
+  const transaction = new Transaction().add(instruction);
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+  transaction.recentBlockhash = blockhash;
+  transaction.feePayer = publicKey;
+  
+  const signedTransaction = await signTransaction(transaction);
+  const signature = await connection.sendRawTransaction(signedTransaction.serialize());
+  
+  await connection.confirmTransaction({
+    blockhash,
+    lastValidBlockHeight,
+    signature
+  }, 'confirmed');
+  
+  console.log('Global game initialized:', signature);
+  
+  return { success: true, signature };
+}
+
+// Dołączanie do globalnej gry
+export async function joinGlobalGame(stakeAmount, wallet) {
+  const { publicKey, signTransaction } = wallet;
+  
+  if (!publicKey) throw new Error('Wallet not connected');
+  
+  const [gamePDA] = await findGlobalGamePDA();
+  const [playerStatePDA] = await findPlayerStatePDA(publicKey);
+  
+  console.log('Joining global game:', {
+    stakeAmount,
+    gamePDA: gamePDA.toString(),
+    playerStatePDA: playerStatePDA.toString()
+  });
+  
+  const data = serializeJoinGameData(stakeAmount);
+  
+  const instruction = new TransactionInstruction({
+    keys: [
+      { pubkey: publicKey, isSigner: true, isWritable: true },
+      { pubkey: playerStatePDA, isSigner: false, isWritable: true },
+      { pubkey: gamePDA, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey('SysvarRent111111111111111111111111111111111'), isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM_ID,
+    data: data
+  });
+  
   const transaction = new Transaction().add(instruction);
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
   transaction.recentBlockhash = blockhash;
@@ -233,100 +173,48 @@ export async function createRoom(maxPlayers, entryFee, mapSize, gameDuration, wa
   
   console.log('Transaction confirmed');
   
-  // Zarejestruj na serwerze
-  const response = await fetch(`${GAME_SERVER_URL}/api/rooms`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      creatorAddress: publicKey.toString(),
-      maxPlayers,
-      entryFee,
-      roomAddress: gamePDA.toString(),
-      mapSize,
-      gameDuration,
-      transactionSignature: signature
-    })
-  });
-  
-  if (!response.ok) {
-    throw new Error('Failed to register room on server');
-  }
-  
-  const roomData = await response.json();
-  return roomData.roomId;
-}
-
-export async function joinRoom(roomId, entryFee, wallet) {
-  const { publicKey, signTransaction } = wallet;
-  
-  if (!publicKey) throw new Error('Wallet not connected');
-  
-  // Pobierz dane pokoju
-  const response = await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch room data');
-  }
-  const roomData = await response.json();
-  
-  const roomPDA = new PublicKey(roomData.roomAddress);
-  const data = serializeJoinRoomData();
-  
-  const instruction = new TransactionInstruction({
-    keys: [
-      { pubkey: publicKey, isSigner: true, isWritable: true },
-      { pubkey: roomPDA, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    programId: PROGRAM_ID,
-    data: data
-  });
-  
-  const transaction = new Transaction().add(instruction);
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-  transaction.recentBlockhash = blockhash;
-  transaction.feePayer = publicKey;
-  
-  const signedTransaction = await signTransaction(transaction);
-  const signature = await connection.sendRawTransaction(signedTransaction.serialize());
-  
-  await connection.confirmTransaction({
-    blockhash,
-    lastValidBlockHeight,
-    signature
-  }, 'confirmed');
-  
   // Powiadom serwer
-  await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}/join`, {
+  const response = await fetch(`${GAME_SERVER_URL}/api/game/join`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       playerAddress: publicKey.toString(),
+      initialStake: Math.floor(stakeAmount * LAMPORTS_PER_SOL),
       transactionSignature: signature
     })
   });
   
-  return { success: true };
+  if (!response.ok) {
+    throw new Error('Failed to register with game server');
+  }
+  
+  return {
+    success: true,
+    signature,
+    stakeInLamports: Math.floor(stakeAmount * LAMPORTS_PER_SOL)
+  };
 }
 
-export async function startGame(roomId, wallet) {
+// Aktualizacja wartości gracza po zjedzeniu
+export async function updatePlayerValue(eaterAddress, eatenAddress, eatenValue, wallet) {
   const { publicKey, signTransaction } = wallet;
   
   if (!publicKey) throw new Error('Wallet not connected');
   
-  const response = await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch room data');
-  }
-  const roomData = await response.json();
+  const [gamePDA] = await findGlobalGamePDA();
+  const eaterPubkey = new PublicKey(eaterAddress);
+  const eatenPubkey = new PublicKey(eatenAddress);
+  const [eaterStatePDA] = await findPlayerStatePDA(eaterPubkey);
+  const [eatenStatePDA] = await findPlayerStatePDA(eatenPubkey);
   
-  const gameId = `game_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-  const roomPDA = new PublicKey(roomData.roomAddress);
-  const data = serializeStartGameData(gameId);
+  const data = serializeUpdatePlayerValueData(eaterPubkey, eatenPubkey, eatenValue);
   
   const instruction = new TransactionInstruction({
     keys: [
-      { pubkey: publicKey, isSigner: true, isWritable: true },
-      { pubkey: roomPDA, isSigner: false, isWritable: true },
+      { pubkey: publicKey, isSigner: true, isWritable: true }, // Authority (server)
+      { pubkey: eaterStatePDA, isSigner: false, isWritable: true },
+      { pubkey: eatenStatePDA, isSigner: false, isWritable: true },
+      { pubkey: gamePDA, isSigner: false, isWritable: true },
     ],
     programId: PROGRAM_ID,
     data: data
@@ -347,108 +235,52 @@ export async function startGame(roomId, wallet) {
   }, 'confirmed');
   
   // Powiadom serwer
-  await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}/start`, {
+  await fetch(`${GAME_SERVER_URL}/api/game/update-value`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      gameId,
-      initiatorAddress: publicKey.toString(),
+      eaterAddress,
+      eatenAddress,
+      eatenValue,
       transactionSignature: signature
     })
   });
   
-  return gameId;
+  return { success: true, signature };
 }
 
-export async function endGame(roomId, winnerAddress, wallet) {
+// Cash out - wypłata i wyjście z gry
+export async function cashOut(wallet) {
   const { publicKey, signTransaction } = wallet;
   
   if (!publicKey) throw new Error('Wallet not connected');
   
-  const response = await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch room data');
-  }
-  const roomData = await response.json();
+  const [gamePDA] = await findGlobalGamePDA();
+  const [playerStatePDA] = await findPlayerStatePDA(publicKey);
   
-  // Sprawdź czy gra już została zakończona na blockchainie
-  if (roomData.blockchainEnded) {
-    console.log('Game already ended on blockchain');
-    return { success: true, alreadyEnded: true };
+  // Pobierz aktualny stan gracza
+  const playerStateAccount = await connection.getAccountInfo(playerStatePDA);
+  if (!playerStateAccount) {
+    throw new Error('Player state not found');
   }
   
-  // Sprawdź czy podany gracz faktycznie wygrał
-  if (roomData.winner !== winnerAddress) {
-    throw new Error('Winner mismatch');
-  }
+  // Parsuj wartość gracza (uproszczone - w prawdziwej aplikacji użyj Borsh)
+  // Zakładamy że current_value jest na pozycji 40-48 (po pubkey i stake_amount)
+  const currentValue = playerStateAccount.data.readBigUInt64LE(40);
+  const currentValueSol = Number(currentValue) / LAMPORTS_PER_SOL;
   
-  const roomPDA = new PublicKey(roomData.roomAddress);
-  const winnerPubkey = new PublicKey(winnerAddress);
-  const data = serializeEndGameData(winnerPubkey);
+  console.log('Cashing out:', {
+    currentValue: currentValue.toString(),
+    currentValueSol
+  });
+  
+  const data = serializeCashOutData();
   
   const instruction = new TransactionInstruction({
     keys: [
       { pubkey: publicKey, isSigner: true, isWritable: true },
-      { pubkey: roomPDA, isSigner: false, isWritable: true },
-    ],
-    programId: PROGRAM_ID,
-    data: data
-  });
-  
-  const transaction = new Transaction().add(instruction);
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-  transaction.recentBlockhash = blockhash;
-  transaction.feePayer = publicKey;
-  
-  const signedTransaction = await signTransaction(transaction);
-  const signature = await connection.sendRawTransaction(signedTransaction.serialize());
-  
-  await connection.confirmTransaction({
-    blockhash,
-    lastValidBlockHeight,
-    signature
-  }, 'confirmed');
-  
-  // Powiadom serwer
-  await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}/end`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      winnerAddress,
-      transactionSignature: signature
-    })
-  });
-  
-  return { success: true };
-}
-
-export async function claimPrize(roomId, wallet) {
-  const { publicKey, signTransaction } = wallet;
-  
-  if (!publicKey) throw new Error('Wallet not connected');
-  
-  const response = await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch room data');
-  }
-  const roomData = await response.json();
-  
-  if (roomData.winner !== publicKey.toString()) {
-    throw new Error('Only winner can claim prize');
-  }
-  
-  const roomPDA = new PublicKey(roomData.roomAddress);
-  const totalPrize = roomData.entryFee * roomData.players.length;
-  const platformFee = totalPrize * 0.05;
-  const winnerPrize = totalPrize * 0.95;
-  
-  const data = serializeClaimPrizeData();
-  
-  const instruction = new TransactionInstruction({
-    keys: [
-      { pubkey: publicKey, isSigner: true, isWritable: true },
-      { pubkey: roomPDA, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: playerStatePDA, isSigner: false, isWritable: true },
+      { pubkey: gamePDA, isSigner: false, isWritable: true },
       { pubkey: PLATFORM_FEE_WALLET, isSigner: false, isWritable: true },
     ],
     programId: PROGRAM_ID,
@@ -469,99 +301,36 @@ export async function claimPrize(roomId, wallet) {
     signature
   }, 'confirmed');
   
-  return {
-    winner: publicKey.toString(),
-    prize: winnerPrize,
-    platformFee: platformFee,
-    totalPrize: totalPrize,
-    claimedAt: new Date().toISOString()
-  };
-}
-
-export function connectToGameServer(roomId, playerAddress) {
-  const socket = initializeSocket();
-  return socket;
-}
-
-// Dodaj tę funkcję do src/utils/SolanaTransactions.js
-
-function serializeCancelRoomData() {
-  const buffer = Buffer.alloc(1);
-  buffer.writeUInt8(6, 0); // CancelRoom instruction
-  return buffer;
-}
-
-export async function cancelRoom(roomId, wallet) {
-  const { publicKey, signTransaction } = wallet;
-  
-  if (!publicKey) throw new Error('Wallet not connected');
-  
-  // Pobierz dane pokoju
-  const response = await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}`);
-  if (!response.ok) {
-    throw new Error('Failed to fetch room data');
-  }
-  const roomData = await response.json();
-  
-  // Sprawdź czy użytkownik jest twórcą
-  if (roomData.creatorAddress !== publicKey.toString()) {
-    throw new Error('Only room creator can cancel the room');
-  }
-  
-  // Sprawdź czy gra nie została rozpoczęta
-  if (roomData.gameStarted) {
-    throw new Error('Cannot cancel room after game has started');
-  }
-  
-  const roomPDA = new PublicKey(roomData.roomAddress);
-  const data = serializeCancelRoomData();
-  
-  // Przygotuj konta dla wszystkich graczy którym trzeba zwrócić środki
-  const keys = [
-    { pubkey: publicKey, isSigner: true, isWritable: true },
-    { pubkey: roomPDA, isSigner: false, isWritable: true },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-  ];
-  
-  // Dodaj konta pozostałych graczy (jeśli są)
-  for (let i = 1; i < roomData.players.length; i++) {
-    keys.push({
-      pubkey: new PublicKey(roomData.players[i]),
-      isSigner: false,
-      isWritable: true
-    });
-  }
-  
-  const instruction = new TransactionInstruction({
-    keys,
-    programId: PROGRAM_ID,
-    data: data
-  });
-  
-  const transaction = new Transaction().add(instruction);
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-  transaction.recentBlockhash = blockhash;
-  transaction.feePayer = publicKey;
-  
-  const signedTransaction = await signTransaction(transaction);
-  const signature = await connection.sendRawTransaction(signedTransaction.serialize());
-  
-  await connection.confirmTransaction({
-    blockhash,
-    lastValidBlockHeight,
-    signature
-  }, 'confirmed');
-  
-  // Powiadom serwer o anulowaniu
-  await fetch(`${GAME_SERVER_URL}/api/rooms/${roomId}/cancel`, {
+  // Powiadom serwer
+  await fetch(`${GAME_SERVER_URL}/api/game/cashout`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      playerAddress: publicKey.toString(),
       transactionSignature: signature
     })
   });
   
-  return { success: true, signature };
+  const platformFee = currentValueSol * 0.05;
+  const playerReceived = currentValueSol * 0.95;
+  
+  return {
+    success: true,
+    signature,
+    cashOutAmount: currentValueSol,
+    platformFee,
+    playerReceived
+  };
 }
 
-export { socket };
+// Połączenie z serwerem gry
+export function connectToGameServer() {
+  const socket = io(GAME_SERVER_URL, {
+    reconnection: true,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000,
+    transports: ['websocket', 'polling']
+  });
+  
+  return socket;
+}

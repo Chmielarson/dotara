@@ -3,7 +3,6 @@ pub mod solana_io;
 
 use solana_program::entrypoint;
 
-// Poprawne użycie makra entrypoint - bez :: w środku
 #[cfg(not(feature = "no-entrypoint"))]
 entrypoint!(process_instruction);
 

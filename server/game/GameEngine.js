@@ -4,13 +4,9 @@ const Food = require('./Food');
 const Physics = require('./Physics');
 
 class GameEngine {
-  constructor(roomId, mapSize = 3000) {
-    this.roomId = roomId;
-    this.mapSize = mapSize;
-    // Ilość jedzenia proporcjonalna do wielkości mapy
-    // Bazowo: 170 jedzenia dla mapy 3000x3000
-    // Skaluje się kwadratowo z powierzchnią mapy
-    this.maxFood = Math.floor(170 * (mapSize / 3000) * (mapSize / 3000));
+  constructor() {
+    this.mapSize = 5000; // Większa mapa dla ciągłej gry
+    this.maxFood = 500; // Więcej jedzenia
     this.players = new Map();
     this.food = new Map();
     this.physics = new Physics();
@@ -19,10 +15,13 @@ class GameEngine {
     this.tickRate = 120; // 60 FPS
     this.gameLoop = null;
     this.leaderboard = [];
-    this.winner = null;
-    this.eliminatedPlayers = new Set();
     
-    console.log(`Game ${roomId} created with map size ${mapSize} and ${this.maxFood} food items`);
+    // Statystyki globalne
+    this.totalSolInGame = 0;
+    this.totalPlayersJoined = 0;
+    this.totalPlayersCashedOut = 0;
+    
+    console.log(`Global game engine created with map size ${this.mapSize}`);
     
     // Inicjalizuj jedzenie
     this.initializeFood();
@@ -43,53 +42,60 @@ class GameEngine {
     this.food.set(food.id, food);
   }
   
-  addPlayer(playerAddress, nickname = null) {
-    if (this.players.has(playerAddress)) {
-      return this.players.get(playerAddress);
+  addPlayer(playerAddress, nickname = null, initialStake = 0) {
+    // Sprawdź czy gracz już istnieje
+    let player = this.players.get(playerAddress);
+    
+    if (player && player.isAlive) {
+      // Gracz już jest w grze i żyje
+      return player;
     }
     
-    // Losowa pozycja startowa
-    const x = Math.random() * this.mapSize;
-    const y = Math.random() * this.mapSize;
+    // Losowa pozycja startowa z marginesem od krawędzi
+    const margin = 200;
+    const x = margin + Math.random() * (this.mapSize - 2 * margin);
+    const y = margin + Math.random() * (this.mapSize - 2 * margin);
     
-    const player = new Player(playerAddress, x, y, nickname);
-    this.players.set(playerAddress, player);
+    if (player && !player.isAlive) {
+      // Respawn istniejącego gracza
+      player.respawn(x, y);
+      console.log(`Player ${playerAddress} respawned with stake: ${initialStake}`);
+    } else {
+      // Nowy gracz
+      player = new Player(playerAddress, x, y, nickname, initialStake);
+      this.players.set(playerAddress, player);
+      this.totalSolInGame += initialStake;
+      this.totalPlayersJoined++;
+      console.log(`Player ${playerAddress} joined with stake: ${initialStake} lamports`);
+    }
     
-    console.log(`Player ${playerAddress} added to game ${this.roomId}`);
     return player;
   }
   
-  removePlayer(playerAddress) {
+  removePlayer(playerAddress, cashOut = false) {
     const player = this.players.get(playerAddress);
-    if (player) {
-      // Zamień gracza na jedzenie
-      if (player.isAlive) {
-        this.convertPlayerToFood(player);
-      }
+    if (!player) return null;
+    
+    if (cashOut) {
+      // Gracz wypłaca i wychodzi
+      this.totalSolInGame -= player.solValue;
+      this.totalPlayersCashedOut++;
       this.players.delete(playerAddress);
-      this.eliminatedPlayers.add(playerAddress);
-      
-      console.log(`Player ${playerAddress} removed from game ${this.roomId}`);
-      
-      // Sprawdź czy został tylko jeden gracz
-      const activePlayers = Array.from(this.players.values()).filter(p => p.isAlive);
-      console.log(`Active players remaining: ${activePlayers.length}`);
-      
-      if (activePlayers.length === 1 && this.isRunning) {
-        this.winner = activePlayers[0].address;
-        console.log(`Game ${this.roomId} has a winner: ${this.winner}`);
-        // Zatrzymaj grę
-        this.stop();
-      } else if (activePlayers.length === 0 && this.isRunning) {
-        console.log(`Game ${this.roomId} ended with no survivors`);
-        this.winner = null;
-        this.stop();
-      }
+      console.log(`Player ${playerAddress} cashed out with ${player.solValue} lamports`);
+      return player;
+    } else if (player.isAlive) {
+      // Gracz został zjedzony - zostaje w grze jako martwy
+      this.convertPlayerToFood(player);
+      player.die();
+      console.log(`Player ${playerAddress} was eaten`);
+      return player;
     }
+    
+    return null;
   }
   
   convertPlayerToFood(player) {
-    // Rozdziel masę gracza na kilka kulek jedzenia
+    // Rozdziel tylko masę gracza na jedzenie (nie SOL!)
     const numFood = Math.min(Math.floor(player.mass / 20), 10);
     const foodMass = player.mass / numFood;
     
@@ -115,19 +121,15 @@ class GameEngine {
       player.setTarget(input.mouseX, input.mouseY);
     }
     
-    // Obsługa podziału (space) - teraz działa jak boost
+    // Obsługa podziału (space) - boost
     if (input.split && player.canSplit()) {
-      player.split(); // To teraz aktywuje boost
+      player.split();
     }
     
     // Obsługa wyrzucania masy (W)
     if (input.eject && player.canEject()) {
       this.ejectMass(player);
     }
-  }
-  
-  splitPlayer(player) {
-    // Ta funkcja nie jest już używana - split działa jako boost
   }
   
   ejectMass(player) {
@@ -164,7 +166,7 @@ class GameEngine {
       this.update();
     }, 1000 / this.tickRate);
     
-    console.log(`Game ${this.roomId} started`);
+    console.log('Global game engine started');
   }
   
   stop() {
@@ -176,12 +178,12 @@ class GameEngine {
       this.gameLoop = null;
     }
     
-    console.log(`Game ${this.roomId} stopped. Winner: ${this.winner}`);
+    console.log('Global game engine stopped');
   }
   
   update() {
     const now = Date.now();
-    const deltaTime = (now - this.lastUpdate) / 1000; // w sekundach
+    const deltaTime = (now - this.lastUpdate) / 1000;
     this.lastUpdate = now;
     
     // Aktualizuj pozycje graczy
@@ -191,7 +193,7 @@ class GameEngine {
       }
     }
     
-    // Aktualizuj pozycje jedzenia (dla wyrzuconej masy)
+    // Aktualizuj pozycje jedzenia
     for (const food of this.food.values()) {
       if (food.velocityX || food.velocityY) {
         food.x += food.velocityX * deltaTime * 60;
@@ -205,7 +207,7 @@ class GameEngine {
         if (Math.abs(food.velocityX) < 0.1) food.velocityX = 0;
         if (Math.abs(food.velocityY) < 0.1) food.velocityY = 0;
         
-        // Granice mapy - jedzenie nie wychodzi poza mapę
+        // Granice mapy
         food.x = Math.max(0, Math.min(this.mapSize, food.x));
         food.y = Math.max(0, Math.min(this.mapSize, food.y));
       }
@@ -225,7 +227,7 @@ class GameEngine {
   
   checkCollisions() {
     const players = Array.from(this.players.values()).filter(p => p.isAlive);
-    const playersToRemove = [];
+    const playersToUpdate = [];
     
     // Kolizje gracz-jedzenie
     for (const player of players) {
@@ -234,7 +236,7 @@ class GameEngine {
       for (const [foodId, food] of this.food) {
         if (this.physics.checkCircleCollision(player, food)) {
           if (player.radius > food.radius) {
-            player.eat(food.mass);
+            player.eatFood(food.mass);
             foodToRemove.push(foodId);
           }
         }
@@ -252,64 +254,75 @@ class GameEngine {
         const player1 = players[i];
         const player2 = players[j];
         
-        // Sprawdź kolizję z 80% pokryciem (zmienione z 50%)
+        // Sprawdź kolizję z 80% pokryciem
         if (this.physics.checkCircleCollisionWithOverlap(player1, player2, 0.8)) {
           // Większy gracz zjada mniejszego
           if (player1.radius > player2.radius * 1.1) {
-            console.log(`Player ${player1.address} is eating player ${player2.address} (80% overlap)`);
-            player1.eat(player2.mass);
-            player2.die();
-            this.eliminatedPlayers.add(player2.address);
-            playersToRemove.push(player2.address);
+            console.log(`Player ${player1.address} is eating player ${player2.address}`);
+            player1.eatPlayer(player2);
+            this.removePlayer(player2.address, false);
+            playersToUpdate.push({
+              eater: player1.address,
+              eaten: player2.address,
+              eatenValue: player2.solValue
+            });
           } else if (player2.radius > player1.radius * 1.1) {
-            console.log(`Player ${player2.address} is eating player ${player1.address} (80% overlap)`);
-            player2.eat(player1.mass);
-            player1.die();
-            this.eliminatedPlayers.add(player1.address);
-            playersToRemove.push(player1.address);
+            console.log(`Player ${player2.address} is eating player ${player1.address}`);
+            player2.eatPlayer(player1);
+            this.removePlayer(player1.address, false);
+            playersToUpdate.push({
+              eater: player2.address,
+              eaten: player1.address,
+              eatenValue: player1.solValue
+            });
           }
         }
       }
     }
     
-    // Usuń graczy po zakończeniu sprawdzania kolizji
-    for (const playerAddress of playersToRemove) {
-      this.removePlayer(playerAddress);
-    }
+    return playersToUpdate;
   }
   
   updateLeaderboard() {
     this.leaderboard = Array.from(this.players.values())
       .filter(p => p.isAlive)
-      .sort((a, b) => b.mass - a.mass)
+      .sort((a, b) => {
+        // Sortuj po wartości SOL, a potem po masie
+        const solDiff = b.solValue - a.solValue;
+        if (solDiff !== 0) return solDiff;
+        return b.mass - a.mass;
+      })
       .slice(0, 10)
       .map((player, index) => ({
         rank: index + 1,
         address: player.address,
         nickname: player.nickname,
         mass: Math.floor(player.mass),
+        solValue: player.solValue,
+        solDisplay: (player.solValue / 1000000000).toFixed(4), // SOL z 4 miejscami po przecinku
         x: player.x,
         y: player.y
       }));
-    
-    // Dodaj liczbę aktywnych graczy
-    const activePlayers = Array.from(this.players.values()).filter(p => p.isAlive);
-    console.log(`Leaderboard update: ${activePlayers.length} active players`);
   }
   
   getGameState() {
     const activePlayers = Array.from(this.players.values()).filter(p => p.isAlive);
+    const totalValue = Array.from(this.players.values())
+      .reduce((sum, p) => sum + p.solValue, 0);
     
     return {
-      roomId: this.roomId,
       mapSize: this.mapSize,
       isRunning: this.isRunning,
-      winner: this.winner,
       playerCount: activePlayers.length,
       totalPlayers: this.players.size,
       foodCount: this.food.size,
       leaderboard: this.leaderboard,
-      eliminatedPlayers: Array.from(this.eliminatedPlayers)
+      totalSolInGame: totalValue,
+      totalSolDisplay: (totalValue / 1000000000).toFixed(4),
+      stats: {
+        totalPlayersJoined: this.totalPlayersJoined,
+        totalPlayersCashedOut: this.totalPlayersCashedOut
+      }
     };
   }
   
@@ -317,7 +330,7 @@ class GameEngine {
     const player = this.players.get(playerAddress);
     if (!player) return null;
     
-    // Jeśli gracz nie żyje, zwróć tylko podstawowe informacje
+    // Jeśli gracz nie żyje, zwróć specjalny widok
     if (!player.isAlive) {
       return {
         player: {
@@ -326,18 +339,21 @@ class GameEngine {
           radius: player.radius,
           mass: player.mass,
           color: player.color,
-          isAlive: false
+          isAlive: false,
+          solValue: player.solValue,
+          currentValueSol: player.getCurrentValueInSol()
         },
         players: [],
         food: [],
         leaderboard: this.leaderboard,
-        gameState: this.getGameState()
+        gameState: this.getGameState(),
+        canRespawn: player.solValue > 0 // Może respawnować jeśli ma SOL
       };
     }
     
-    // Obszar widoczny dla gracza - dostosowany do wielkości ekranu
-    const baseViewRadius = 400; // Zwiększone z 150 na 400
-    const viewRadius = baseViewRadius + player.radius * 3; // Większy współczynnik skalowania
+    // Obszar widoczny dla gracza
+    const baseViewRadius = 400;
+    const viewRadius = baseViewRadius + player.radius * 3;
     
     // Filtruj obiekty w zasięgu wzroku
     const visiblePlayers = Array.from(this.players.values())
@@ -352,7 +368,9 @@ class GameEngine {
         nickname: p.nickname,
         mass: p.mass,
         isMe: p.address === playerAddress,
-        isBoosting: p.isBoosting
+        isBoosting: p.isBoosting,
+        solValue: p.solValue,
+        solDisplay: (p.solValue / 1000000000).toFixed(4)
       }));
     
     const visibleFood = Array.from(this.food.values())
@@ -373,12 +391,29 @@ class GameEngine {
         mass: player.mass,
         color: player.color,
         isAlive: player.isAlive,
-        isBoosting: player.isBoosting
+        isBoosting: player.isBoosting,
+        solValue: player.solValue,
+        currentValueSol: player.getCurrentValueInSol(),
+        playersEaten: player.playersEaten
       },
       players: visiblePlayers,
       food: visibleFood,
       leaderboard: this.leaderboard,
       gameState: this.getGameState()
+    };
+  }
+  
+  // Metoda do obsługi cash out
+  handleCashOut(playerAddress) {
+    const player = this.removePlayer(playerAddress, true);
+    if (!player) return null;
+    
+    return {
+      address: playerAddress,
+      finalValue: player.solValue,
+      finalValueSol: player.getCurrentValueInSol(),
+      playersEaten: player.playersEaten,
+      totalEarned: player.totalSolEarned
     };
   }
 }

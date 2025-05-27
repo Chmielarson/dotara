@@ -2,29 +2,22 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import Canvas from './Canvas';
-import { connectToGameServer, claimPrize, endGame } from '../utils/SolanaTransactions';
+import { cashOut } from '../utils/SolanaTransactions';
 import './Game.css';
 
-export default function Game({ roomId, roomInfo, onBack }) {
+export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   const wallet = useWallet();
   const { publicKey } = wallet;
   
   const [gameState, setGameState] = useState(null);
   const [playerView, setPlayerView] = useState(null);
-  const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [nickname, setNickname] = useState('');
-  const [showNicknameInput, setShowNicknameInput] = useState(true);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-  const [isGameEnded, setIsGameEnded] = useState(false);
-  const [winner, setWinner] = useState(null);
-  const [isClaiming, setIsClaiming] = useState(false);
-  const [isEndingGame, setIsEndingGame] = useState(false);
-  const [gameEndedOnBlockchain, setGameEndedOnBlockchain] = useState(false);
-  const [nicknameTimeout, setNicknameTimeout] = useState(null);
+  const [isPlayerDead, setIsPlayerDead] = useState(false);
+  const [canRespawn, setCanRespawn] = useState(false);
+  const [isCashingOut, setIsCashingOut] = useState(false);
+  const [showCashOutModal, setShowCashOutModal] = useState(false);
   const [playerJoined, setPlayerJoined] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(15);
-  const endGameAttemptedRef = useRef(false);
   
   const canvasRef = useRef(null);
   const inputRef = useRef({
@@ -36,18 +29,15 @@ export default function Game({ roomId, roomInfo, onBack }) {
   
   // Zapobiegaj przewijaniu strony podczas gry
   useEffect(() => {
-    // Zapisz oryginalne style
     const originalOverflow = document.body.style.overflow;
     const originalPosition = document.body.style.position;
     const originalHeight = document.body.style.height;
     
-    // Ustaw body na fixed podczas gry
     document.body.style.overflow = 'hidden';
     document.body.style.position = 'fixed';
     document.body.style.height = '100vh';
     document.body.style.width = '100vw';
     
-    // Przywróć oryginalne style przy wyjściu
     return () => {
       document.body.style.overflow = originalOverflow;
       document.body.style.position = originalPosition;
@@ -56,159 +46,72 @@ export default function Game({ roomId, roomInfo, onBack }) {
     };
   }, []);
   
-  // Auto-start po 15 sekundach jeśli nick nie został podany
+  // Connect to game
   useEffect(() => {
-    if (showNicknameInput) {
-      let seconds = 15;
-      setTimeLeft(15);
-      
-      const interval = setInterval(() => {
-        seconds--;
-        setTimeLeft(seconds);
-        
-        if (seconds <= 0) {
-          // Jeśli po 15 sekundach nie ma nicku, użyj adresu
-          if (!nickname) {
-            const defaultNick = publicKey.toString().substring(0, 8);
-            setNickname(defaultNick);
-            handleSetNickname(defaultNick);
-          }
-          clearInterval(interval);
-        }
-      }, 1000);
-      
-      setNicknameTimeout(interval);
-      
-      return () => {
-        if (interval) clearInterval(interval);
-      };
-    }
-  }, [showNicknameInput]);
-  
-  // Connect to game server - ale NIE dołączaj do gry dopóki nie ma nicku
-  useEffect(() => {
-    if (!roomId || !publicKey) return;
+    if (!socket || !publicKey || playerJoined) return;
     
-    const connect = async () => {
-      try {
-        const io = await connectToGameServer(roomId, publicKey.toString());
-        setSocket(io);
+    socket.emit('join_game', {
+      playerAddress: publicKey.toString(),
+      nickname: nickname,
+      initialStake: initialStake
+    });
+    
+    socket.on('joined_game', (data) => {
+      if (data.success) {
         setIsConnected(true);
-        
-        // NIE dołączaj do gry od razu - czekaj na nick
-        
-        // Listen for updates
-        io.on('game_state', (state) => {
-          setGameState(state);
-        });
-        
-        io.on('player_view', (view) => {
-          setPlayerView(view);
-        });
-        
-        io.on('player_eliminated', (data) => {
-          if (data.playerAddress === publicKey.toString()) {
-            // Player was eliminated
-            setPlayerView(prev => ({
-              ...prev,
-              player: { ...prev?.player, isAlive: false }
-            }));
-          }
-        });
-        
-        io.on('game_ended', async (data) => {
-          console.log('Game ended event received:', data);
-          setIsGameEnded(true);
-          setWinner(data.winner);
-          
-          // If game was ended on blockchain, mark it
-          if (data.blockchainConfirmed) {
-            setGameEndedOnBlockchain(true);
-            endGameAttemptedRef.current = true;
-          }
-          
-          // If you won and transaction wasn't sent yet
-          if (data.winner === publicKey.toString() && 
-              !data.blockchainConfirmed && 
-              !isEndingGame && 
-              !gameEndedOnBlockchain &&
-              !endGameAttemptedRef.current) {
-            
-            console.log('Attempting to end game on blockchain...');
-            endGameAttemptedRef.current = true;
-            setIsEndingGame(true);
-            
-            try {
-              const result = await endGame(roomId, data.winner, wallet);
-              if (result.alreadyEnded) {
-                console.log('Game already ended on blockchain');
-                setGameEndedOnBlockchain(true);
-              } else {
-                console.log('Game ended successfully on blockchain');
-                setGameEndedOnBlockchain(true);
-              }
-            } catch (error) {
-              // Check if error means game was already ended
-              if (error.message && (error.message.includes('invalid account data') || 
-                  error.message.includes('already been processed'))) {
-                console.log('Game already ended on blockchain');
-                setGameEndedOnBlockchain(true);
-              } else {
-                console.error('Error ending game on blockchain:', error);
-                // On error, reset flag to allow retry
-                endGameAttemptedRef.current = false;
-              }
-            } finally {
-              setIsEndingGame(false);
-            }
-          }
-        });
-        
-        io.on('error', (error) => {
-          console.error('Game error:', error);
-        });
-      } catch (error) {
-        console.error('Error connecting to game server:', error);
+        setPlayerJoined(true);
+        console.log('Joined game successfully');
       }
-    };
+    });
     
-    connect();
+    socket.on('game_state', (state) => {
+      setGameState(state);
+    });
+    
+    socket.on('player_view', (view) => {
+      setPlayerView(view);
+      
+      // Check if player is dead
+      if (view.player && !view.player.isAlive) {
+        setIsPlayerDead(true);
+        setCanRespawn(view.canRespawn);
+      } else {
+        setIsPlayerDead(false);
+      }
+    });
+    
+    socket.on('player_eliminated', (data) => {
+      if (data.playerAddress === publicKey.toString()) {
+        setIsPlayerDead(true);
+        setCanRespawn(data.canRespawn);
+      }
+    });
+    
+    socket.on('cash_out_result', (result) => {
+      console.log('Cash out successful:', result);
+      onLeaveGame();
+    });
+    
+    socket.on('error', (error) => {
+      console.error('Game error:', error);
+    });
     
     return () => {
-      if (socket) {
-        socket.disconnect();
-      }
+      socket.off('joined_game');
+      socket.off('game_state');
+      socket.off('player_view');
+      socket.off('player_eliminated');
+      socket.off('cash_out_result');
+      socket.off('error');
     };
-  }, [roomId, publicKey, wallet]);
+  }, [socket, publicKey, nickname, initialStake, playerJoined, onLeaveGame]);
   
-  // Dołącz do gry TYLKO gdy gracz wybierze nick
-  useEffect(() => {
-    if (!socket || !isConnected || showNicknameInput || playerJoined) return;
-    
-    // Join game
-    socket.emit('join_game', {
-      roomId,
-      playerAddress: publicKey.toString()
-    });
-    
-    // Set nickname
-    socket.emit('set_nickname', {
-      roomId,
-      playerAddress: publicKey.toString(),
-      nickname: nickname.trim()
-    });
-    
-    setPlayerJoined(true);
-    console.log('Player joined game with nickname:', nickname);
-  }, [socket, isConnected, showNicknameInput, playerJoined, roomId, publicKey, nickname]);
-  
-  // Send player input with increased rate for smoother gameplay
+  // Send player input
   useEffect(() => {
     if (!socket || !isConnected || !playerJoined) return;
     
     const sendInput = () => {
       socket.emit('player_input', {
-        roomId,
         playerAddress: publicKey.toString(),
         input: inputRef.current
       });
@@ -221,11 +124,11 @@ export default function Game({ roomId, roomInfo, onBack }) {
     const interval = setInterval(sendInput, 33); // 30 times per second
     
     return () => clearInterval(interval);
-  }, [socket, isConnected, playerJoined, roomId, publicKey]);
+  }, [socket, isConnected, playerJoined, publicKey]);
   
   // Mouse handling
   const handleMouseMove = useCallback((e) => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || isPlayerDead) return;
     
     const rect = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -239,25 +142,26 @@ export default function Game({ roomId, roomInfo, onBack }) {
       const centerX = canvas.width / 2;
       const centerY = canvas.height / 2;
       
-      // Calculate zoom level based on player size and screen size
+      // Calculate zoom level
       const screenSize = Math.min(canvas.width, canvas.height);
       const baseZoom = screenSize / 800;
-      // Znacznie wolniejsze oddalanie - zmniejszone o 70%
       const playerZoom = Math.max(0.8, Math.min(1.5, 100 / (playerView.player.radius * 0.3 + 50)));
       const zoomLevel = baseZoom * playerZoom;
       
-      // Calculate position in game world with zoom
+      // Calculate position in game world
       const worldX = playerView.player.x + (x - centerX) / zoomLevel;
       const worldY = playerView.player.y + (y - centerY) / zoomLevel;
       
       inputRef.current.mouseX = worldX;
       inputRef.current.mouseY = worldY;
     }
-  }, [playerView]);
+  }, [playerView, isPlayerDead]);
   
   // Keyboard handling
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (isPlayerDead) return;
+      
       switch(e.key) {
         case ' ':
           e.preventDefault();
@@ -273,116 +177,68 @@ export default function Game({ roomId, roomInfo, onBack }) {
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [isPlayerDead]);
   
-  // Set nickname
-  const handleSetNickname = (customNick = null) => {
-    const finalNick = customNick || nickname.trim();
+  // Handle respawn
+  const handleRespawn = () => {
+    if (!canRespawn || !socket) return;
     
-    if (!finalNick) {
-      // Jeśli nie ma nicku, użyj początku adresu
-      const defaultNick = publicKey.toString().substring(0, 8);
-      setNickname(defaultNick);
-    }
+    socket.emit('respawn', {
+      playerAddress: publicKey.toString()
+    });
     
-    // Wyczyść timeout jeśli istnieje
-    if (nicknameTimeout) {
-      clearTimeout(nicknameTimeout);
-      setNicknameTimeout(null);
-    }
-    
-    setShowNicknameInput(false);
+    setIsPlayerDead(false);
   };
   
-  // Claim prize
-  const handleClaimPrize = async () => {
-    if (!winner || winner !== publicKey.toString() || isClaiming) return;
+  // Handle cash out
+  const handleCashOut = async () => {
+    if (!playerView || !playerView.player || isCashingOut) return;
     
+    if (playerView.player.solValue === 0) {
+      alert('You have no SOL to cash out!');
+      return;
+    }
+    
+    setShowCashOutModal(true);
+  };
+  
+  const confirmCashOut = async () => {
     try {
-      setIsClaiming(true);
-      const result = await claimPrize(roomId, wallet);
+      setIsCashingOut(true);
+      
+      // Execute blockchain transaction
+      const result = await cashOut(wallet);
+      
+      // Notify server
+      socket.emit('cash_out', {
+        playerAddress: publicKey.toString()
+      });
       
       alert(
-        `🎉 Congratulations!\n\n` +
-        `💰 Total pool: ${result.totalPrize.toFixed(2)} SOL\n` +
-        `🏆 Your prize (95%): ${result.prize.toFixed(2)} SOL\n` +
-        `🏛️ Platform fee (5%): ${result.platformFee.toFixed(2)} SOL\n\n` +
-        `Prize has been sent to your wallet!`
+        `💰 Cash out successful!\n\n` +
+        `You cashed out: ${result.cashOutAmount.toFixed(4)} SOL\n` +
+        `Platform fee (5%): ${result.platformFee.toFixed(4)} SOL\n` +
+        `Total received: ${result.playerReceived.toFixed(4)} SOL`
       );
       
-      onBack();
+      onLeaveGame();
     } catch (error) {
-      console.error('Error claiming prize:', error);
-      alert(`Error claiming prize: ${error.message}`);
+      console.error('Error cashing out:', error);
+      alert(`Error cashing out: ${error.message}`);
     } finally {
-      setIsClaiming(false);
+      setIsCashingOut(false);
+      setShowCashOutModal(false);
     }
   };
   
-  // Format time
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  // Format SOL value
+  const formatSol = (lamports) => {
+    return (lamports / 1000000000).toFixed(4);
   };
-  
-  // Calculate remaining game time
-  const calculateRemainingTime = () => {
-    if (!roomInfo.gameStartedAt || !roomInfo.gameDuration) return null;
-    
-    const startTime = new Date(roomInfo.gameStartedAt).getTime();
-    const duration = roomInfo.gameDuration * 60 * 1000; // minutes to ms
-    const endTime = startTime + duration;
-    const now = Date.now();
-    
-    const remaining = Math.max(0, endTime - now);
-    return Math.floor(remaining / 1000); // seconds
-  };
-  
-  const [remainingTime, setRemainingTime] = useState(null);
-  
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const time = calculateRemainingTime();
-      setRemainingTime(time);
-      
-      if (time === 0 && !isGameEnded) {
-        // Game should end
-      }
-    }, 1000);
-    
-    return () => clearInterval(interval);
-  }, [roomInfo, isGameEnded]);
-  
-  if (showNicknameInput) {
-    return (
-      <div className="nickname-screen">
-        <div className="nickname-container">
-          <h2>Choose your name</h2>
-          <input
-            type="text"
-            placeholder="Enter nickname..."
-            value={nickname}
-            onChange={(e) => setNickname(e.target.value)}
-            maxLength={20}
-            onKeyPress={(e) => e.key === 'Enter' && handleSetNickname()}
-            autoFocus
-          />
-          <div className="button-group">
-            <button onClick={() => handleSetNickname()}>Start game</button>
-            <button onClick={onBack} className="back-btn">Back</button>
-          </div>
-          <p className="timer-info">
-            Game will start automatically in {timeLeft} seconds...
-          </p>
-        </div>
-      </div>
-    );
-  }
   
   return (
     <div className="game-container">
-      {/* UI Overlay */}
+      {/* Game UI */}
       <div className="game-ui">
         {/* Leaderboard */}
         <div className="leaderboard">
@@ -391,38 +247,50 @@ export default function Game({ roomId, roomInfo, onBack }) {
             <div key={player.address} className="leaderboard-item">
               <span className="rank">{player.rank}.</span>
               <span className="nickname">{player.nickname}</span>
-              <span className="mass">{player.mass}</span>
+              <span className="sol">{player.solDisplay} SOL</span>
             </div>
           ))}
         </div>
         
-        {/* Game info */}
-        <div className="game-info">
-          <div className="info-item">
-            <span>Players:</span>
-            <span>{gameState?.playerCount || 0}</span>
+        {/* Player info */}
+        {playerView?.player && (
+          <div className="player-info">
+            <div className="info-item">
+              <span>Your Value:</span>
+              <span className="value sol-value">
+                {formatSol(playerView.player.solValue)} SOL
+              </span>
+            </div>
+            <div className="info-item">
+              <span>Mass:</span>
+              <span className="value">{Math.floor(playerView.player.mass)}</span>
+            </div>
+            <div className="info-item">
+              <span>Players Eaten:</span>
+              <span className="value">{playerView.player.playersEaten || 0}</span>
+            </div>
+            <div className="info-item">
+              <span>Position:</span>
+              <span className="value">
+                {Math.floor(playerView.player.x)}, {Math.floor(playerView.player.y)}
+              </span>
+            </div>
           </div>
-          <div className="info-item">
-            <span>Time left:</span>
-            <span className="timer">
-              {remainingTime !== null ? formatTime(remainingTime) : '--:--'}
-            </span>
+        )}
+        
+        {/* Game stats */}
+        {gameState && (
+          <div className="game-info">
+            <div className="info-item">
+              <span>Active Players:</span>
+              <span className="value">{gameState.playerCount}</span>
+            </div>
+            <div className="info-item">
+              <span>Total SOL in Game:</span>
+              <span className="value">{gameState.totalSolDisplay} SOL</span>
+            </div>
           </div>
-          {playerView?.player && (
-            <>
-              <div className="info-item">
-                <span>Mass:</span>
-                <span>{Math.floor(playerView.player.mass)}</span>
-              </div>
-              <div className="info-item">
-                <span>Position:</span>
-                <span>
-                  {Math.floor(playerView.player.x)}, {Math.floor(playerView.player.y)}
-                </span>
-              </div>
-            </>
-          )}
-        </div>
+        )}
         
         {/* Controls */}
         <div className="controls">
@@ -436,6 +304,17 @@ export default function Game({ roomId, roomInfo, onBack }) {
             <kbd>W</kbd> - Eject mass
           </div>
         </div>
+        
+        {/* Cash out button */}
+        {playerView?.player && playerView.player.isAlive && (
+          <button 
+            className="cash-out-btn"
+            onClick={handleCashOut}
+            disabled={isCashingOut}
+          >
+            💰 Cash Out ({formatSol(playerView.player.solValue)} SOL)
+          </button>
+        )}
       </div>
       
       {/* Game canvas */}
@@ -445,70 +324,81 @@ export default function Game({ roomId, roomInfo, onBack }) {
         onMouseMove={handleMouseMove}
       />
       
-      {/* Elimination screen (for eaten player) */}
-      {playerView && !playerView.player.isAlive && !isGameEnded && (
-        <div className="game-over-overlay">
-          <div className="game-over-content">
+      {/* Death screen */}
+      {isPlayerDead && (
+        <div className="death-overlay">
+          <div className="death-content">
             <h1>You were eaten!</h1>
-            <p>You can watch the rest of the game or return to lobby.</p>
-            
-            <div className="spectator-info">
-              <h3>Players remaining: {gameState?.playerCount || 0}</h3>
-            </div>
-            
-            <button onClick={onBack} className="back-btn">
-              Back to lobby
-            </button>
+            {canRespawn && playerView?.player ? (
+              <>
+                <p>You still have {formatSol(playerView.player.solValue)} SOL</p>
+                <div className="death-options">
+                  <button className="respawn-btn" onClick={handleRespawn}>
+                    Respawn
+                  </button>
+                  <button className="cash-out-death-btn" onClick={handleCashOut}>
+                    Cash Out & Leave
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p>You lost all your SOL!</p>
+                <button className="leave-btn" onClick={onLeaveGame}>
+                  Back to Menu
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
       
-      {/* Game end screen */}
-      {isGameEnded && (
-        <div className="game-over-overlay">
-          <div className="game-over-content">
-            <h1>Game Over!</h1>
-            {winner === publicKey?.toString() ? (
-              <>
-                <h2 className="winner-text">🎉 You won! 🎉</h2>
-                <p>Congratulations! You are the last survivor.</p>
-                <button 
-                  className="claim-btn"
-                  onClick={handleClaimPrize}
-                  disabled={isClaiming}
-                >
-                  {isClaiming ? 'Claiming...' : 'Claim prize'}
-                </button>
-              </>
-            ) : (
-              <>
-                <h2>You lost</h2>
-                <p>Winner: {winner?.substring(0, 8)}...</p>
-                <button onClick={onBack} className="back-btn">Back to lobby</button>
-              </>
-            )}
-            
-            {/* Final leaderboard */}
-            <div className="final-leaderboard">
-              <h3>Final ranking</h3>
-              {gameState?.leaderboard?.map((player, index) => (
-                <div key={player.address} className="leaderboard-item">
-                  <span className="rank">{player.rank}.</span>
-                  <span className="nickname">{player.nickname}</span>
-                  <span className="mass">{player.mass}</span>
-                </div>
-              ))}
+      {/* Cash out modal */}
+      {showCashOutModal && playerView?.player && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h2>Confirm Cash Out</h2>
+            <div className="cash-out-info">
+              <div className="info-row">
+                <span>Current Value:</span>
+                <span>{formatSol(playerView.player.solValue)} SOL</span>
+              </div>
+              <div className="info-row">
+                <span>Platform Fee (5%):</span>
+                <span>{formatSol(playerView.player.solValue * 0.05)} SOL</span>
+              </div>
+              <div className="info-row highlight">
+                <span>You'll Receive:</span>
+                <span>{formatSol(playerView.player.solValue * 0.95)} SOL</span>
+              </div>
+            </div>
+            <p className="warning">
+              Are you sure you want to cash out and leave the game?
+            </p>
+            <div className="modal-buttons">
+              <button 
+                className="cancel-btn"
+                onClick={() => setShowCashOutModal(false)}
+                disabled={isCashingOut}
+              >
+                Cancel
+              </button>
+              <button 
+                className="confirm-btn"
+                onClick={confirmCashOut}
+                disabled={isCashingOut}
+              >
+                {isCashingOut ? 'Processing...' : 'Confirm Cash Out'}
+              </button>
             </div>
           </div>
         </div>
       )}
       
       {/* Exit button */}
-      {!isGameEnded && (
-        <button className="exit-btn" onClick={onBack}>
-          Leave game
-        </button>
-      )}
+      <button className="exit-btn" onClick={onLeaveGame}>
+        Leave Game
+      </button>
     </div>
   );
 }

@@ -5,119 +5,59 @@ use solana_program::{
     msg,
     program_error::ProgramError,
     pubkey::Pubkey,
-    program::{invoke, invoke_signed},
+    program::invoke,
     system_instruction,
     sysvar::{rent::Rent, Sysvar, clock::Clock},
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
-/// Stany gry
-#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]
-pub enum GameStatus {
-    WaitingForPlayers,
-    InProgress,
-    Completed,
+/// Struktura gracza w grze
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct PlayerState {
+    pub pubkey: Pubkey,              // 32 bajty - adres gracza
+    pub stake_amount: u64,           // 8 bajtów - ile SOL wniósł
+    pub current_value: u64,          // 8 bajtów - aktualna wartość w lamports
+    pub is_active: bool,             // 1 bajt - czy gracz jest aktywny
+    pub joined_at: i64,              // 8 bajtów - timestamp dołączenia
+    pub last_cashout: i64,           // 8 bajtów - ostatnia wypłata
+    pub total_earned: u64,           // 8 bajtów - łączne zarobki
 }
 
-/// Struktura danych gry - maksymalnie zoptymalizowana
+impl PlayerState {
+    pub const SIZE: usize = 32 + 8 + 8 + 1 + 8 + 8 + 8; // 73 bajty
+}
+
+/// Globalna gra - pojedyncza instancja
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
-pub struct GameRoom {
-    pub creator: Pubkey,                  // 32 bajty
-    pub players: [Pubkey; 10],            // 320 bajtów (zmniejszone z 20 do 10)
-    pub eliminated: [bool; 10],           // 10 bajtów
-    pub player_count: u8,                 // 1 bajt
-    pub max_players: u8,                  // 1 bajt
-    pub entry_fee_lamports: u64,          // 8 bajtów
-    pub status: GameStatus,               // 1 bajt
-    pub winner: Option<Pubkey>,           // 33 bajty
-    pub created_at: i64,                  // 8 bajtów
-    pub game_started_at: Option<i64>,     // 9 bajtów
-    pub game_ended_at: Option<i64>,       // 9 bajtów
-    pub prize_claimed: bool,              // 1 bajt
-    pub game_id: [u8; 16],               // 16 bajtów (zmniejszone z 32)
-    pub room_slot: u8,                   // 1 bajt
-    pub game_duration_minutes: u16,       // 2 bajty
-    pub map_size: u16,                   // 2 bajty
+pub struct GlobalGame {
+    pub is_initialized: bool,        // 1 bajt
+    pub total_pool: u64,            // 8 bajtów - całkowita pula
+    pub platform_fee_collected: u64, // 8 bajtów - zebrane prowizje
+    pub active_players: u32,         // 4 bajty - liczba aktywnych graczy
+    pub total_players: u32,          // 4 bajty - wszyscy gracze
+    pub created_at: i64,            // 8 bajtów
+    pub min_stake: u64,             // 8 bajtów - minimalna stawka
+    pub max_stake: u64,             // 8 bajtów - maksymalna stawka
+    pub platform_fee_percent: u8,    // 1 bajt - procent prowizji
 }
 
-impl GameRoom {
-    pub const SIZE: usize = 512; // Zmniejszone z 1024
+impl GlobalGame {
+    pub const SIZE: usize = 512; // Rezerwujemy miejsce na przyszłe rozszerzenia
     pub const HEADER_SIZE: usize = 4;
+    pub const MAX_PLAYERS: usize = 1000; // Maksymalna liczba graczy
     
-    pub fn new(creator: Pubkey, max_players: u8, entry_fee_lamports: u64, 
-               created_at: i64, room_slot: u8, game_duration_minutes: u16, 
-               map_size: u16) -> Self {
-        let mut players = [Pubkey::default(); 10];
-        players[0] = creator;
-        
+    pub fn new(created_at: i64) -> Self {
         Self {
-            creator,
-            players,
-            eliminated: [false; 10],
-            player_count: 1,
-            max_players,
-            entry_fee_lamports,
-            status: GameStatus::WaitingForPlayers,
-            winner: None,
+            is_initialized: true,
+            total_pool: 0,
+            platform_fee_collected: 0,
+            active_players: 0,
+            total_players: 0,
             created_at,
-            game_started_at: None,
-            game_ended_at: None,
-            prize_claimed: false,
-            game_id: [0u8; 16],
-            room_slot,
-            game_duration_minutes,
-            map_size,
+            min_stake: 10_000_000,    // 0.01 SOL minimum
+            max_stake: 10_000_000_000, // 10 SOL maximum
+            platform_fee_percent: 5,   // 5% prowizji
         }
-    }
-    
-    pub fn add_player(&mut self, player: Pubkey) -> Result<(), ProgramError> {
-        if self.player_count >= self.max_players {
-            return Err(ProgramError::InvalidArgument);
-        }
-        
-        // Sprawdź czy gracz już jest w pokoju
-        for i in 0..self.player_count as usize {
-            if self.players[i] == player {
-                return Err(ProgramError::InvalidArgument);
-            }
-        }
-        
-        self.players[self.player_count as usize] = player;
-        self.player_count += 1;
-        Ok(())
-    }
-    
-    pub fn eliminate_player(&mut self, player: Pubkey) -> Result<(), ProgramError> {
-        for i in 0..self.player_count as usize {
-            if self.players[i] == player {
-                self.eliminated[i] = true;
-                return Ok(());
-            }
-        }
-        Err(ProgramError::InvalidArgument)
-    }
-    
-    pub fn count_active_players(&self) -> u8 {
-        let mut count = 0;
-        for i in 0..self.player_count as usize {
-            if !self.eliminated[i] {
-                count += 1;
-            }
-        }
-        count
-    }
-    
-    pub fn find_last_active_player(&self) -> Option<Pubkey> {
-        let mut last_player = None;
-        for i in 0..self.player_count as usize {
-            if !self.eliminated[i] {
-                if last_player.is_some() {
-                    return None; // Więcej niż jeden aktywny gracz
-                }
-                last_player = Some(self.players[i]);
-            }
-        }
-        last_player
     }
     
     pub fn from_account_data(data: &[u8]) -> Result<Self, ProgramError> {
@@ -165,38 +105,30 @@ impl GameRoom {
 /// Instrukcje programu
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub enum SolanaIoInstruction {
-    /// Tworzy nowy pokój gry
-    CreateRoom {
-        max_players: u8,
-        entry_fee_lamports: u64,
-        room_slot: u8,
-        game_duration_minutes: u16,
-        map_size: u16,
+    /// Inicjalizuje globalną grę (tylko raz)
+    InitializeGame,
+    
+    /// Gracz dołącza do gry z określoną stawką
+    JoinGame {
+        stake_amount: u64,
     },
     
-    /// Dołącza do pokoju
-    JoinRoom,
-    
-    /// Rozpoczyna grę
-    StartGame {
-        game_id: String,
-    },
-    
-    /// Eliminuje gracza (wywoływane przez serwer)
-    EliminatePlayer {
+    /// Aktualizuje wartość gracza po zjedzeniu innego gracza
+    UpdatePlayerValue {
         player: Pubkey,
+        eaten_player: Pubkey,
+        eaten_value: u64,
     },
     
-    /// Kończy grę i ustala zwycięzcę
-    EndGame {
-        winner: Pubkey,
+    /// Gracz wypłaca swoje środki i opuszcza grę
+    CashOut,
+    
+    /// Admin może zaktualizować parametry gry
+    UpdateGameParams {
+        min_stake: Option<u64>,
+        max_stake: Option<u64>,
+        platform_fee_percent: Option<u8>,
     },
-    
-    /// Odbiera nagrodę
-    ClaimPrize,
-    
-    /// Anuluje pokój
-    CancelRoom,
 }
 
 /// Przetwarzanie instrukcji programu
@@ -208,95 +140,47 @@ pub fn process_instruction(
     let instruction = SolanaIoInstruction::try_from_slice(input)?;
     
     match instruction {
-        SolanaIoInstruction::CreateRoom { 
-            max_players, 
-            entry_fee_lamports, 
-            room_slot,
-            game_duration_minutes,
-            map_size 
-        } => {
-            msg!("Creating Solana.io room");
-            process_create_room(
-                program_id, 
-                accounts, 
-                max_players, 
-                entry_fee_lamports, 
-                room_slot,
-                game_duration_minutes,
-                map_size
-            )
+        SolanaIoInstruction::InitializeGame => {
+            msg!("Initializing Solana.io global game");
+            process_initialize_game(program_id, accounts)
         },
-        SolanaIoInstruction::JoinRoom => {
-            msg!("Joining room");
-            process_join_room(program_id, accounts)
+        SolanaIoInstruction::JoinGame { stake_amount } => {
+            msg!("Player joining game with stake: {} lamports", stake_amount);
+            process_join_game(program_id, accounts, stake_amount)
         },
-        SolanaIoInstruction::StartGame { game_id } => {
-            msg!("Starting game");
-            process_start_game(program_id, accounts, game_id)
+        SolanaIoInstruction::UpdatePlayerValue { player, eaten_player, eaten_value } => {
+            msg!("Updating player value after eating");
+            process_update_player_value(program_id, accounts, player, eaten_player, eaten_value)
         },
-        SolanaIoInstruction::EliminatePlayer { player } => {
-            msg!("Eliminating player");
-            process_eliminate_player(program_id, accounts, player)
+        SolanaIoInstruction::CashOut => {
+            msg!("Player cashing out");
+            process_cash_out(program_id, accounts)
         },
-        SolanaIoInstruction::EndGame { winner } => {
-            msg!("Ending game");
-            process_end_game(program_id, accounts, winner)
-        },
-        SolanaIoInstruction::ClaimPrize => {
-            msg!("Claiming prize");
-            process_claim_prize(program_id, accounts)
-        },
-        SolanaIoInstruction::CancelRoom => {
-            msg!("Canceling room");
-            process_cancel_room(program_id, accounts)
+        SolanaIoInstruction::UpdateGameParams { min_stake, max_stake, platform_fee_percent } => {
+            msg!("Updating game parameters");
+            process_update_game_params(program_id, accounts, min_stake, max_stake, platform_fee_percent)
         },
     }
 }
 
-fn process_create_room(
+fn process_initialize_game(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
-    max_players: u8,
-    entry_fee_lamports: u64,
-    room_slot: u8,
-    game_duration_minutes: u16,
-    map_size: u16,
 ) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     
-    let creator_account = next_account_info(accounts_iter)?;
+    let initializer = next_account_info(accounts_iter)?;
     let game_account = next_account_info(accounts_iter)?;
     let system_program = next_account_info(accounts_iter)?;
     let rent_account = next_account_info(accounts_iter)?;
     
-    if !creator_account.is_signer {
+    if !initializer.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
     }
     
-    // Walidacja parametrów
-    if max_players < 2 || max_players > 10 { // Zmniejszone z 20 do 10
-        return Err(ProgramError::InvalidArgument);
-    }
-    
-    if entry_fee_lamports == 0 {
-        return Err(ProgramError::InvalidArgument);
-    }
-    
-    if room_slot >= 50 {
-        return Err(ProgramError::InvalidArgument);
-    }
-    
-    if game_duration_minutes < 5 || game_duration_minutes > 60 {
-        return Err(ProgramError::InvalidArgument);
-    }
-    
-    if map_size < 1000 || map_size > 10000 {
-        return Err(ProgramError::InvalidArgument);
-    }
-    
-    // Weryfikacja PDA
+    // Weryfikacja PDA dla globalnej gry
     let (expected_game_pubkey, bump_seed) = Pubkey::find_program_address(
-        &[b"solana_io", creator_account.key.as_ref(), &[room_slot]],
+        &[b"global_game"],
         program_id,
     );
     
@@ -304,98 +188,116 @@ fn process_create_room(
         return Err(ProgramError::InvalidArgument);
     }
     
-    // Obliczenie czynszu
+    // Sprawdź czy gra już jest zainicjalizowana
+    if !game_account.data_is_empty() {
+        return Err(ProgramError::AccountAlreadyInitialized);
+    }
+    
+    // Oblicz czynsz
     let rent = Rent::from_account_info(rent_account)?;
-    let space = GameRoom::SIZE;
+    let space = GlobalGame::SIZE;
     let lamports = rent.minimum_balance(space);
     
-    // Utworzenie konta PDA
+    // Utwórz konto PDA dla gry
     invoke_signed(
         &system_instruction::create_account(
-            creator_account.key,
+            initializer.key,
             game_account.key,
             lamports,
             space as u64,
             program_id,
         ),
         &[
-            creator_account.clone(),
+            initializer.clone(),
             game_account.clone(),
             system_program.clone(),
         ],
-        &[&[b"solana_io", creator_account.key.as_ref(), &[room_slot], &[bump_seed]]],
+        &[&[b"global_game", &[bump_seed]]],
     )?;
     
-    // Transfer wpisowego
-    invoke(
-        &system_instruction::transfer(
-            creator_account.key,
-            game_account.key,
-            entry_fee_lamports,
-        ),
-        &[
-            creator_account.clone(),
-            game_account.clone(),
-            system_program.clone(),
-        ],
-    )?;
-    
-    // Inicjalizacja danych pokoju
+    // Inicjalizuj dane gry
     let clock = Clock::get()?;
-    let game_room = GameRoom::new(
-        *creator_account.key,
-        max_players,
-        entry_fee_lamports,
-        clock.unix_timestamp,
-        room_slot,
-        game_duration_minutes,
-        map_size,
-    );
+    let game = GlobalGame::new(clock.unix_timestamp);
     
-    game_room.to_account_data(&mut game_account.data.borrow_mut())?;
+    game.to_account_data(&mut game_account.data.borrow_mut())?;
     
-    msg!("Created Solana.io room in slot {}", room_slot);
+    msg!("Global game initialized successfully");
     Ok(())
 }
 
-fn process_join_room(
-    _program_id: &Pubkey,
+fn process_join_game(
+    program_id: &Pubkey,
     accounts: &[AccountInfo],
+    stake_amount: u64,
 ) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     
     let player_account = next_account_info(accounts_iter)?;
+    let player_state_account = next_account_info(accounts_iter)?;
     let game_account = next_account_info(accounts_iter)?;
     let system_program = next_account_info(accounts_iter)?;
+    let rent_account = next_account_info(accounts_iter)?;
     
     if !player_account.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
     }
     
-    let mut game_room = GameRoom::from_account_data(&game_account.data.borrow())?;
+    // Załaduj dane gry
+    let mut game = GlobalGame::from_account_data(&game_account.data.borrow())?;
     
-    if game_room.status != GameStatus::WaitingForPlayers {
-        return Err(ProgramError::InvalidAccountData);
-    }
-    
-    // Sprawdź czy gracz już jest w pokoju
-    for i in 0..game_room.player_count as usize {
-        if game_room.players[i] == *player_account.key {
-            return Err(ProgramError::InvalidArgument);
-        }
-    }
-    
-    // Sprawdź czy jest miejsce
-    if game_room.player_count >= game_room.max_players {
+    // Walidacja stawki
+    if stake_amount < game.min_stake || stake_amount > game.max_stake {
+        msg!("Invalid stake amount: {} (min: {}, max: {})", 
+             stake_amount, game.min_stake, game.max_stake);
         return Err(ProgramError::InvalidArgument);
     }
     
-    // Transfer wpisowego
+    // Weryfikacja PDA dla stanu gracza
+    let (expected_player_state_pubkey, bump_seed) = Pubkey::find_program_address(
+        &[b"player_state", player_account.key.as_ref()],
+        program_id,
+    );
+    
+    if expected_player_state_pubkey != *player_state_account.key {
+        return Err(ProgramError::InvalidArgument);
+    }
+    
+    // Jeśli gracz już ma konto, sprawdź czy jest nieaktywny
+    if !player_state_account.data_is_empty() {
+        let player_state = PlayerState::try_from_slice(&player_state_account.data.borrow())?;
+        if player_state.is_active {
+            return Err(ProgramError::AccountAlreadyInitialized);
+        }
+        // Gracz może ponownie dołączyć jeśli jest nieaktywny
+    } else {
+        // Utwórz nowe konto dla gracza
+        let rent = Rent::from_account_info(rent_account)?;
+        let space = PlayerState::SIZE;
+        let lamports = rent.minimum_balance(space);
+        
+        invoke_signed(
+            &system_instruction::create_account(
+                player_account.key,
+                player_state_account.key,
+                lamports,
+                space as u64,
+                program_id,
+            ),
+            &[
+                player_account.clone(),
+                player_state_account.clone(),
+                system_program.clone(),
+            ],
+            &[&[b"player_state", player_account.key.as_ref(), &[bump_seed]]],
+        )?;
+    }
+    
+    // Transfer stawki do puli gry
     invoke(
         &system_instruction::transfer(
             player_account.key,
             game_account.key,
-            game_room.entry_fee_lamports,
+            stake_amount,
         ),
         &[
             player_account.clone(),
@@ -404,177 +306,86 @@ fn process_join_room(
         ],
     )?;
     
-    // Dodaj gracza używając metody add_player
-    game_room.add_player(*player_account.key)?;
-    game_room.to_account_data(&mut game_account.data.borrow_mut())?;
-    
-    msg!("Player joined Solana.io room");
-    Ok(())
-}
-
-fn process_start_game(
-    _program_id: &Pubkey,
-    accounts: &[AccountInfo],
-    game_id: String,
-) -> ProgramResult {
-    let accounts_iter = &mut accounts.iter();
-    
-    let initiator_account = next_account_info(accounts_iter)?;
-    let game_account = next_account_info(accounts_iter)?;
-    
-    if !initiator_account.is_signer {
-        return Err(ProgramError::MissingRequiredSignature);
-    }
-    
-    let mut game_room = GameRoom::from_account_data(&game_account.data.borrow())?;
-    
-    // Sprawdź czy inicjator jest w grze
-    let mut is_player = false;
-    for i in 0..game_room.player_count as usize {
-        if game_room.players[i] == *initiator_account.key {
-            is_player = true;
-            break;
-        }
-    }
-    
-    if !is_player {
-        return Err(ProgramError::InvalidArgument);
-    }
-    
-    if game_room.status != GameStatus::WaitingForPlayers {
-        return Err(ProgramError::InvalidAccountData);
-    }
-    
-    if game_room.player_count < 2 {
-        return Err(ProgramError::InvalidArgument);
-    }
-    
-    // Ustawienie ID gry
-    let game_id_bytes = game_id.as_bytes();
-    let len = game_id_bytes.len().min(16);
-    game_room.game_id[..len].copy_from_slice(&game_id_bytes[..len]);
-    
+    // Utwórz stan gracza
     let clock = Clock::get()?;
-    game_room.game_started_at = Some(clock.unix_timestamp);
+    let player_state = PlayerState {
+        pubkey: *player_account.key,
+        stake_amount,
+        current_value: stake_amount,
+        is_active: true,
+        joined_at: clock.unix_timestamp,
+        last_cashout: 0,
+        total_earned: 0,
+    };
     
-    // WAŻNE: Zmień status gry na InProgress
-    game_room.status = GameStatus::InProgress;
+    player_state.serialize(&mut &mut player_state_account.data.borrow_mut()[..])?;
     
-    game_room.to_account_data(&mut game_account.data.borrow_mut())?;
+    // Zaktualizuj dane gry
+    game.total_pool += stake_amount;
+    game.active_players += 1;
+    game.total_players += 1;
     
-    msg!("Solana.io game started");
+    game.to_account_data(&mut game_account.data.borrow_mut())?;
+    
+    msg!("Player {} joined with stake: {} lamports", player_account.key, stake_amount);
     Ok(())
 }
 
-fn process_eliminate_player(
-    _program_id: &Pubkey,
+fn process_update_player_value(
+    program_id: &Pubkey,
     accounts: &[AccountInfo],
     player: Pubkey,
+    eaten_player: Pubkey,
+    eaten_value: u64,
 ) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     
     let authority_account = next_account_info(accounts_iter)?;
+    let player_state_account = next_account_info(accounts_iter)?;
+    let eaten_player_state_account = next_account_info(accounts_iter)?;
     let game_account = next_account_info(accounts_iter)?;
     
     if !authority_account.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
     }
     
-    let mut game_room = GameRoom::from_account_data(&game_account.data.borrow())?;
+    // TODO: Dodać weryfikację authority (np. serwer gry)
     
-    // Sprawdź czy gra jest w toku
-    if game_room.status != GameStatus::InProgress {
+    // Załaduj stany graczy
+    let mut player_state = PlayerState::try_from_slice(&player_state_account.data.borrow())?;
+    let mut eaten_player_state = PlayerState::try_from_slice(&eaten_player_state_account.data.borrow())?;
+    
+    if !player_state.is_active || !eaten_player_state.is_active {
         return Err(ProgramError::InvalidAccountData);
     }
     
-    // Sprawdź czy gracz jest w grze
-    let mut player_found = false;
-    for i in 0..game_room.player_count as usize {
-        if game_room.players[i] == player {
-            player_found = true;
-            break;
-        }
-    }
+    // Transfer wartości
+    player_state.current_value += eaten_value;
+    eaten_player_state.current_value = 0;
+    eaten_player_state.is_active = false;
     
-    if !player_found {
-        return Err(ProgramError::InvalidArgument);
-    }
+    // Zapisz zmiany
+    player_state.serialize(&mut &mut player_state_account.data.borrow_mut()[..])?;
+    eaten_player_state.serialize(&mut &mut eaten_player_state_account.data.borrow_mut()[..])?;
     
-    // Eliminuj gracza
-    game_room.eliminate_player(player)?;
+    // Zaktualizuj liczbę aktywnych graczy
+    let mut game = GlobalGame::from_account_data(&game_account.data.borrow())?;
+    game.active_players = game.active_players.saturating_sub(1);
+    game.to_account_data(&mut game_account.data.borrow_mut())?;
     
-    // Sprawdź czy został tylko jeden gracz
-    let active_players = game_room.count_active_players();
-    if active_players == 1 {
-        // Znajdź zwycięzcę
-        if let Some(winner) = game_room.find_last_active_player() {
-            game_room.winner = Some(winner);
-            game_room.status = GameStatus::Completed;
-            let clock = Clock::get()?;
-            game_room.game_ended_at = Some(clock.unix_timestamp);
-        }
-    }
-    
-    game_room.to_account_data(&mut game_account.data.borrow_mut())?;
-    
-    msg!("Player eliminated from Solana.io game");
+    msg!("Player {} gained {} lamports from eating {}", player, eaten_value, eaten_player);
     Ok(())
 }
 
-fn process_end_game(
-    _program_id: &Pubkey,
-    accounts: &[AccountInfo],
-    winner: Pubkey,
-) -> ProgramResult {
-    let accounts_iter = &mut accounts.iter();
-    
-    let initiator_account = next_account_info(accounts_iter)?;
-    let game_account = next_account_info(accounts_iter)?;
-    
-    if !initiator_account.is_signer {
-        return Err(ProgramError::MissingRequiredSignature);
-    }
-    
-    let mut game_room = GameRoom::from_account_data(&game_account.data.borrow())?;
-    
-    if game_room.status != GameStatus::InProgress {
-        return Err(ProgramError::InvalidAccountData);
-    }
-    
-    // Sprawdź czy zwycięzca jest w grze
-    let mut winner_found = false;
-    for i in 0..game_room.player_count as usize {
-        if game_room.players[i] == winner {
-            winner_found = true;
-            break;
-        }
-    }
-    
-    if !winner_found {
-        return Err(ProgramError::InvalidArgument);
-    }
-    
-    game_room.status = GameStatus::Completed;
-    game_room.winner = Some(winner);
-    
-    let clock = Clock::get()?;
-    game_room.game_ended_at = Some(clock.unix_timestamp);
-    
-    game_room.to_account_data(&mut game_account.data.borrow_mut())?;
-    
-    msg!("Solana.io game ended. Winner: {}", winner);
-    Ok(())
-}
-
-fn process_claim_prize(
+fn process_cash_out(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
 ) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     
-    let winner_account = next_account_info(accounts_iter)?;
+    let player_account = next_account_info(accounts_iter)?;
+    let player_state_account = next_account_info(accounts_iter)?;
     let game_account = next_account_info(accounts_iter)?;
-    let _system_program = next_account_info(accounts_iter)?;
     let platform_fee_account = next_account_info(accounts_iter)?;
     
     const PLATFORM_WALLET: &str = "FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8";
@@ -584,32 +395,27 @@ fn process_claim_prize(
         return Err(ProgramError::InvalidArgument);
     }
     
-    if !winner_account.is_signer {
+    if !player_account.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
     }
     
-    if game_account.owner != program_id {
-        return Err(ProgramError::IncorrectProgramId);
-    }
+    // Załaduj stan gracza
+    let mut player_state = PlayerState::try_from_slice(&player_state_account.data.borrow())?;
     
-    let mut game_room = GameRoom::from_account_data(&game_account.data.borrow())?;
-    
-    if game_room.status != GameStatus::Completed {
+    if !player_state.is_active {
         return Err(ProgramError::InvalidAccountData);
     }
     
-    if game_room.winner != Some(*winner_account.key) {
-        return Err(ProgramError::InvalidArgument);
+    if player_state.current_value == 0 {
+        return Err(ProgramError::InsufficientFunds);
     }
     
-    if game_room.prize_claimed {
-        return Err(ProgramError::InvalidAccountData);
-    }
+    // Załaduj grę
+    let mut game = GlobalGame::from_account_data(&game_account.data.borrow())?;
     
-    // Obliczenie puli i prowizji
-    let total_prize = game_room.entry_fee_lamports * game_room.player_count as u64;
-    let platform_fee = total_prize * 5 / 100; // 5% prowizji
-    let winner_prize = total_prize - platform_fee;
+    // Oblicz prowizję
+    let platform_fee = player_state.current_value * game.platform_fee_percent as u64 / 100;
+    let player_payout = player_state.current_value - platform_fee;
     
     // Transfer prowizji
     if platform_fee > 0 {
@@ -619,81 +425,71 @@ fn process_claim_prize(
             platform_fee_account.lamports().saturating_add(platform_fee);
     }
     
-    // Transfer nagrody
+    // Transfer wypłaty do gracza
     **game_account.try_borrow_mut_lamports()? = 
-        game_account.lamports().saturating_sub(winner_prize);
-    **winner_account.try_borrow_mut_lamports()? = 
-        winner_account.lamports().saturating_add(winner_prize);
+        game_account.lamports().saturating_sub(player_payout);
+    **player_account.try_borrow_mut_lamports()? = 
+        player_account.lamports().saturating_add(player_payout);
     
-    game_room.prize_claimed = true;
-    game_room.to_account_data(&mut game_account.data.borrow_mut())?;
+    // Zaktualizuj stan gracza
+    let clock = Clock::get()?;
+    player_state.is_active = false;
+    player_state.last_cashout = clock.unix_timestamp;
+    player_state.total_earned += player_payout;
+    let final_value = player_state.current_value;
+    player_state.current_value = 0;
     
-    msg!("Prize claimed. Platform fee: {} lamports, Winner prize: {} lamports", 
-         platform_fee, winner_prize);
+    player_state.serialize(&mut &mut player_state_account.data.borrow_mut()[..])?;
+    
+    // Zaktualizuj grę
+    game.total_pool = game.total_pool.saturating_sub(final_value);
+    game.active_players = game.active_players.saturating_sub(1);
+    game.platform_fee_collected += platform_fee;
+    
+    game.to_account_data(&mut game_account.data.borrow_mut())?;
+    
+    msg!("Player cashed out: {} lamports (fee: {} lamports)", player_payout, platform_fee);
     Ok(())
 }
 
-fn process_cancel_room(
-    program_id: &Pubkey,
+fn process_update_game_params(
+    _program_id: &Pubkey,
     accounts: &[AccountInfo],
+    min_stake: Option<u64>,
+    max_stake: Option<u64>,
+    platform_fee_percent: Option<u8>,
 ) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     
-    let creator_account = next_account_info(accounts_iter)?;
+    let admin_account = next_account_info(accounts_iter)?;
     let game_account = next_account_info(accounts_iter)?;
-    let system_program = next_account_info(accounts_iter)?;
     
-    if !creator_account.is_signer {
+    if !admin_account.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
     }
     
-    let game_room = GameRoom::from_account_data(&game_account.data.borrow())?;
+    // TODO: Dodać weryfikację że to rzeczywiście admin
+    // Na razie zakładamy że pierwszy inicjalizator to admin
     
-    if game_room.creator != *creator_account.key {
-        return Err(ProgramError::InvalidArgument);
+    let mut game = GlobalGame::from_account_data(&game_account.data.borrow())?;
+    
+    if let Some(min) = min_stake {
+        game.min_stake = min;
     }
     
-    if game_room.status != GameStatus::WaitingForPlayers {
-        return Err(ProgramError::InvalidAccountData);
+    if let Some(max) = max_stake {
+        game.max_stake = max;
     }
     
-    // Sygnatury PDA
-    let seeds = &[b"solana_io", game_room.creator.as_ref(), &[game_room.room_slot]];
-    let (_, bump_seed) = Pubkey::find_program_address(seeds, program_id);
-    let signer_seeds = &[b"solana_io", game_room.creator.as_ref(), &[game_room.room_slot], &[bump_seed]];
-    
-    // Zwrot wpisowego każdemu graczowi
-    let mut remaining_accounts_iter = accounts_iter.clone();
-    for i in 0..game_room.player_count as usize {
-        let player_pubkey = &game_room.players[i];
-        if *player_pubkey != game_room.creator {
-            let player_account = next_account_info(&mut remaining_accounts_iter)?;
-            
-            if *player_account.key != *player_pubkey {
-                return Err(ProgramError::InvalidArgument);
-            }
-            
-            invoke_signed(
-                &system_instruction::transfer(
-                    game_account.key,
-                    player_account.key,
-                    game_room.entry_fee_lamports,
-                ),
-                &[
-                    game_account.clone(),
-                    player_account.clone(),
-                    system_program.clone(),
-                ],
-                &[signer_seeds],
-            )?;
+    if let Some(fee) = platform_fee_percent {
+        if fee > 10 { // Maksymalnie 10% prowizji
+            return Err(ProgramError::InvalidArgument);
         }
+        game.platform_fee_percent = fee;
     }
     
-    // Zwróć resztę do twórcy
-    let remaining_lamports = game_account.lamports();
-    **game_account.lamports.borrow_mut() = 0;
-    **creator_account.lamports.borrow_mut() += remaining_lamports;
+    game.to_account_data(&mut game_account.data.borrow_mut())?;
     
-    msg!("Solana.io room cancelled");
+    msg!("Game parameters updated");
     Ok(())
 }
