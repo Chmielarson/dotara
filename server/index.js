@@ -4,7 +4,16 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const { Connection, PublicKey, clusterApiUrl } = require('@solana/web3.js');
+const { 
+  Connection, 
+  PublicKey, 
+  clusterApiUrl,
+  Keypair,
+  Transaction,
+  TransactionInstruction,
+  sendAndConfirmTransaction
+} = require('@solana/web3.js');
+const fs = require('fs');
 const GameEngine = require('./game/GameEngine');
 
 dotenv.config();
@@ -33,12 +42,104 @@ const io = new Server(server, {
 // Konfiguracja Solana
 const SOLANA_NETWORK = process.env.SOLANA_NETWORK || 'devnet';
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || clusterApiUrl(SOLANA_NETWORK);
-const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || '7vEFGgPDdATrHR7WqQk3sfAxkgFwyoM9tJVGndFpVhyr');
+const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || '7rw6uErfMmgnwZWs3UReFGc1aBtbM152WkV8kudY9aMd');
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
+// Załaduj server wallet jeśli istnieje
+let serverWallet = null;
+try {
+  if (process.env.SERVER_WALLET_PATH && fs.existsSync(process.env.SERVER_WALLET_PATH)) {
+    const walletData = JSON.parse(fs.readFileSync(process.env.SERVER_WALLET_PATH, 'utf8'));
+    serverWallet = Keypair.fromSecretKey(new Uint8Array(walletData));
+    console.log('Server wallet loaded:', serverWallet.publicKey.toString());
+  } else {
+    console.warn('No server wallet configured. Automatic blockchain updates disabled.');
+  }
+} catch (error) {
+  console.error('Error loading server wallet:', error);
+}
+
+// Funkcja do aktualizacji wartości gracza na blockchain
+async function updatePlayerValueOnChain(eaterAddress, eatenAddress, eatenValue) {
+  if (!serverWallet) {
+    console.log('No server wallet - skipping blockchain update');
+    return null;
+  }
+  
+  try {
+    console.log('Updating player value on chain:', {
+      eater: eaterAddress,
+      eaten: eatenAddress,
+      value: eatenValue
+    });
+    
+    // Znajdź PDA
+    const [gamePDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('global_game')],
+      PROGRAM_ID
+    );
+    
+    const eaterPubkey = new PublicKey(eaterAddress);
+    const eatenPubkey = new PublicKey(eatenAddress);
+    
+    const [eaterStatePDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('player_state'), eaterPubkey.toBuffer()],
+      PROGRAM_ID
+    );
+    
+    const [eatenStatePDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('player_state'), eatenPubkey.toBuffer()],
+      PROGRAM_ID
+    );
+    
+    // Serializuj dane instrukcji
+    const instructionData = Buffer.alloc(1 + 32 + 32 + 8);
+    instructionData.writeUInt8(2, 0); // UpdatePlayerValue instruction
+    eaterPubkey.toBuffer().copy(instructionData, 1);
+    eatenPubkey.toBuffer().copy(instructionData, 33);
+    instructionData.writeBigUInt64LE(BigInt(eatenValue), 65);
+    
+    // Utwórz instrukcję
+    const instruction = new TransactionInstruction({
+      keys: [
+        { pubkey: serverWallet.publicKey, isSigner: true, isWritable: true },
+        { pubkey: eaterStatePDA, isSigner: false, isWritable: true },
+        { pubkey: eatenStatePDA, isSigner: false, isWritable: true },
+        { pubkey: gamePDA, isSigner: false, isWritable: true },
+      ],
+      programId: PROGRAM_ID,
+      data: instructionData
+    });
+    
+    // Utwórz i wyślij transakcję
+    const transaction = new Transaction().add(instruction);
+    
+    const signature = await sendAndConfirmTransaction(
+      connection,
+      transaction,
+      [serverWallet],
+      { commitment: 'confirmed' }
+    );
+    
+    console.log('Player value updated on chain. Signature:', signature);
+    return signature;
+    
+  } catch (error) {
+    console.error('Error updating player value on chain:', error);
+    return null;
+  }
+}
+
 // Pojedyncza globalna instancja gry
 const globalGame = new GameEngine();
+
+// Ustaw callback dla aktualizacji blockchain
+globalGame.onPlayerEaten = async (eaterAddress, eatenAddress, eatenValue) => {
+  console.log('Player eaten callback triggered');
+  await updatePlayerValueOnChain(eaterAddress, eatenAddress, eatenValue);
+};
+
 globalGame.start();
 
 console.log('Global game started:', globalGame.isRunning);
@@ -108,13 +209,65 @@ app.post('/api/game/cashout', async (req, res) => {
   }
 });
 
+// Admin endpoints (zabezpiecz je w produkcji!)
+app.post('/api/admin/force-remove-player', async (req, res) => {
+  try {
+    const { playerAddress } = req.body;
+    
+    console.log('Admin: Force removing player:', playerAddress);
+    
+    // Usuń z gry
+    const player = globalGame.players.get(playerAddress);
+    if (player) {
+      globalGame.players.delete(playerAddress);
+      globalGame.totalSolInGame -= player.solValue;
+      console.log(`Player ${playerAddress} force removed. Had ${player.solValue} lamports`);
+    }
+    
+    // Usuń mapowania socketów
+    const socketId = playerSockets.get(playerAddress);
+    if (socketId) {
+      playerSockets.delete(playerAddress);
+      socketPlayers.delete(socketId);
+    }
+    
+    res.json({ 
+      success: true, 
+      message: `Player ${playerAddress} removed from game`,
+      removedSol: player ? player.solValue : 0
+    });
+  } catch (error) {
+    console.error('Error force removing player:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/active-players', (req, res) => {
+  const players = Array.from(globalGame.players.values()).map(p => ({
+    address: p.address,
+    nickname: p.nickname,
+    solValue: p.solValue,
+    solDisplay: (p.solValue / 1000000000).toFixed(4),
+    isAlive: p.isAlive,
+    mass: Math.floor(p.mass),
+    position: `${Math.floor(p.x)}, ${Math.floor(p.y)}`
+  }));
+  
+  res.json({
+    totalPlayers: players.length,
+    totalSolInGame: (globalGame.totalSolInGame / 1000000000).toFixed(4),
+    players
+  });
+});
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
     gameActive: globalGame.isRunning,
-    activePlayers: globalGame.players.size
+    activePlayers: globalGame.players.size,
+    serverWallet: serverWallet ? serverWallet.publicKey.toString() : 'not configured'
   });
 });
 
@@ -226,22 +379,36 @@ function broadcastGameState() {
   io.to('game').emit('game_state', gameState);
   
   // Wyślij spersonalizowany widok każdemu graczowi
+  let broadcastCount = 0;
   for (const [playerAddress, socketId] of playerSockets) {
     const playerView = globalGame.getPlayerView(playerAddress);
     
     if (!playerView) {
+      // Gracz został zjedzony - wyślij event eliminacji
+      const player = globalGame.players.get(playerAddress);
+      if (!player || !player.isAlive) {
+        io.to(socketId).emit('player_eliminated', {
+          playerAddress,
+          reason: 'You were eaten by another player!'
+        });
+        // Usuń mapowania dla zjedzonego gracza
+        playerSockets.delete(playerAddress);
+        socketPlayers.delete(socketId);
+      }
       continue;
     }
     
     io.to(socketId).emit('player_view', playerView);
-    
-    // Jeśli gracz został zjedzony
-    if (!playerView.player.isAlive && globalGame.isRunning) {
-      io.to(socketId).emit('player_eliminated', {
-        playerAddress,
-        canRespawn: playerView.canRespawn
-      });
-    }
+    broadcastCount++;
+  }
+  
+  // Log co 5 sekund
+  if (Date.now() % 5000 < 16) {
+    console.log(`Broadcasting to ${broadcastCount} players, game state:`, {
+      activePlayers: gameState.playerCount,
+      totalPlayers: playerSockets.size,
+      foodCount: gameState.foodCount
+    });
   }
 }
 
@@ -265,5 +432,6 @@ server.listen(PORT, () => {
   console.log(`Solana.io Global Game Server running on port ${PORT}`);
   console.log(`Connected to Solana ${SOLANA_NETWORK}`);
   console.log(`Program ID: ${PROGRAM_ID.toString()}`);
+  console.log(`Server wallet: ${serverWallet ? serverWallet.publicKey.toString() : 'not configured'}`);
   console.log('Global game is active and running!');
 });

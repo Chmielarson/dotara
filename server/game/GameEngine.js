@@ -21,6 +21,9 @@ class GameEngine {
     this.totalPlayersJoined = 0;
     this.totalPlayersCashedOut = 0;
     
+    // Callback dla blockchain updates
+    this.onPlayerEaten = null;
+    
     console.log(`Global game engine created with map size ${this.mapSize}`);
     
     // Inicjalizuj jedzenie
@@ -56,18 +59,12 @@ class GameEngine {
     const x = margin + Math.random() * (this.mapSize - 2 * margin);
     const y = margin + Math.random() * (this.mapSize - 2 * margin);
     
-    if (player && !player.isAlive) {
-      // Respawn istniejącego gracza
-      player.respawn(x, y);
-      console.log(`Player ${playerAddress} respawned with stake: ${initialStake}`);
-    } else {
-      // Nowy gracz
-      player = new Player(playerAddress, x, y, nickname, initialStake);
-      this.players.set(playerAddress, player);
-      this.totalSolInGame += initialStake;
-      this.totalPlayersJoined++;
-      console.log(`Player ${playerAddress} joined with stake: ${initialStake} lamports`);
-    }
+    // Nowy gracz lub respawn (ale respawn nie jest już możliwy w nowej mechanice)
+    player = new Player(playerAddress, x, y, nickname, initialStake);
+    this.players.set(playerAddress, player);
+    this.totalSolInGame += initialStake;
+    this.totalPlayersJoined++;
+    console.log(`Player ${playerAddress} joined with stake: ${initialStake} lamports`);
     
     return player;
   }
@@ -83,15 +80,14 @@ class GameEngine {
       this.players.delete(playerAddress);
       console.log(`Player ${playerAddress} cashed out with ${player.solValue} lamports`);
       return player;
-    } else if (player.isAlive) {
-      // Gracz został zjedzony - zostaje w grze jako martwy
+    } else {
+      // Gracz został zjedzony - usuń go całkowicie z gry
       this.convertPlayerToFood(player);
-      player.die();
-      console.log(`Player ${playerAddress} was eaten`);
+      this.totalSolInGame -= player.solValue; // SOL został przekazany innemu graczowi
+      this.players.delete(playerAddress); // Usuń gracza całkowicie
+      console.log(`Player ${playerAddress} was eaten and removed from game`);
       return player;
     }
-    
-    return null;
   }
   
   convertPlayerToFood(player) {
@@ -123,8 +119,6 @@ class GameEngine {
       
       if (!isNaN(mouseX) && !isNaN(mouseY)) {
         player.setTarget(mouseX, mouseY);
-      } else {
-        console.error(`Invalid mouse coordinates from ${playerAddress}: mouseX=${input.mouseX}, mouseY=${input.mouseY}`);
       }
     }
     
@@ -234,6 +228,7 @@ class GameEngine {
   
   checkCollisions() {
     const players = Array.from(this.players.values()).filter(p => p.isAlive);
+    const playersToRemove = [];
     
     // Kolizje gracz-jedzenie
     for (const player of players) {
@@ -265,15 +260,33 @@ class GameEngine {
           // Większy gracz zjada mniejszego
           if (player1.radius > player2.radius * 1.1) {
             console.log(`Player ${player1.address} is eating player ${player2.address}`);
+            const eatenValue = player2.solValue;
             player1.eatPlayer(player2);
-            this.removePlayer(player2.address, false);
+            playersToRemove.push(player2.address);
+            
+            // Wywołaj callback do aktualizacji blockchain
+            if (this.onPlayerEaten) {
+              this.onPlayerEaten(player1.address, player2.address, eatenValue);
+            }
+            
           } else if (player2.radius > player1.radius * 1.1) {
             console.log(`Player ${player2.address} is eating player ${player1.address}`);
+            const eatenValue = player1.solValue;
             player2.eatPlayer(player1);
-            this.removePlayer(player1.address, false);
+            playersToRemove.push(player1.address);
+            
+            // Wywołaj callback do aktualizacji blockchain
+            if (this.onPlayerEaten) {
+              this.onPlayerEaten(player2.address, player1.address, eatenValue);
+            }
           }
         }
       }
+    }
+    
+    // Usuń graczy po zakończeniu sprawdzania kolizji
+    for (const playerAddress of playersToRemove) {
+      this.removePlayer(playerAddress, false);
     }
   }
   
@@ -326,25 +339,9 @@ class GameEngine {
       return null;
     }
     
-    // Jeśli gracz nie żyje, zwróć specjalny widok
+    // Jeśli gracz nie żyje (został zjedzony), nie ma już widoku
     if (!player.isAlive) {
-      return {
-        player: {
-          x: player.x,
-          y: player.y,
-          radius: player.radius,
-          mass: player.mass,
-          color: player.color,
-          isAlive: false,
-          solValue: player.solValue,
-          currentValueSol: player.getCurrentValueInSol()
-        },
-        players: [],
-        food: [],
-        leaderboard: this.leaderboard,
-        gameState: this.getGameState(),
-        canRespawn: player.solValue > 0 // Może respawnować jeśli ma SOL
-      };
+      return null;
     }
     
     // Obszar widoczny dla gracza

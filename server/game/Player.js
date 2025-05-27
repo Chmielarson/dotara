@@ -128,27 +128,30 @@ class Player {
   }
   
   // Jedzenie gracza - dodaje masę i SOL
-  eatPlayer(otherPlayer) {
-    // Dodaj masę zjedzonego gracza
-    this.mass += otherPlayer.mass;
-    
-    // Dodaj wartość SOL zjedzonego gracza
-    this.solValue += otherPlayer.solValue;
-    this.totalSolEarned += otherPlayer.solValue;
-    
-    // Bonus masy za wartość SOL gracza (1 SOL = 100 dodatkowej masy)
-    const solBonus = (otherPlayer.solValue / 1000000000) * 100;
-    this.mass += solBonus;
-    
-    this.playersEaten++;
-    this.score += Math.floor(otherPlayer.mass + solBonus);
-    
-    this.updateRadius();
-    this.updateColor(); // Aktualizuj kolor po zmianie wartości SOL
-    
-    console.log(`Player ${this.address} ate ${otherPlayer.address}. ` +
-                `Gained ${otherPlayer.solValue} lamports and ${otherPlayer.mass + solBonus} mass`);
-  }
+  // Jedzenie gracza - dodaje masę i SOL
+eatPlayer(otherPlayer) {
+  // Dodaj masę zjedzonego gracza
+  this.mass += otherPlayer.mass;
+  
+  // WAŻNE: Dodaj CAŁĄ wartość SOL zjedzonego gracza
+  const gainedSol = otherPlayer.solValue;
+  this.solValue += gainedSol;
+  this.totalSolEarned += gainedSol;
+  
+  // Bonus masy za wartość SOL gracza (1 SOL = 100 dodatkowej masy)
+  const solBonus = (gainedSol / 1000000000) * 100;
+  this.mass += solBonus;
+  
+  this.playersEaten++;
+  this.score += Math.floor(otherPlayer.mass + solBonus);
+  
+  this.updateRadius();
+  this.updateColor(); // Aktualizuj kolor po zmianie wartości SOL
+  
+  console.log(`Player ${this.address} ate ${otherPlayer.address}. ` +
+              `Gained ${gainedSol} lamports (${gainedSol/1000000000} SOL) and ${otherPlayer.mass + solBonus} mass. ` +
+              `New total SOL value: ${this.solValue} lamports (${this.solValue/1000000000} SOL)`);
+}
   
   canSplit() {
     const now = Date.now();

@@ -14,10 +14,10 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   const [isConnected, setIsConnected] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [isPlayerDead, setIsPlayerDead] = useState(false);
-  const [canRespawn, setCanRespawn] = useState(false);
   const [isCashingOut, setIsCashingOut] = useState(false);
   const [showCashOutModal, setShowCashOutModal] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('Connecting...');
+  const [deathReason, setDeathReason] = useState('');
   
   const canvasRef = useRef(null);
   const inputRef = useRef({
@@ -109,20 +109,14 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
         inputRef.current.mouseX = view.player.x;
         inputRef.current.mouseY = view.player.y;
       }
-      
-      if (view.player && !view.player.isAlive) {
-        setIsPlayerDead(true);
-        setCanRespawn(view.canRespawn);
-      } else {
-        setIsPlayerDead(false);
-      }
     };
     
     const handlePlayerEliminated = (data) => {
       console.log('Player eliminated:', data);
       if (data.playerAddress === publicKey.toString()) {
         setIsPlayerDead(true);
-        setCanRespawn(data.canRespawn);
+        setDeathReason(data.reason || 'You were eaten by another player!');
+        setPlayerView(null); // Clear player view since they're out of the game
       }
     };
     
@@ -158,7 +152,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   
   // Send player input
   useEffect(() => {
-    if (!socket || !isConnected || !publicKey) return;
+    if (!socket || !isConnected || !publicKey || isPlayerDead) return;
     
     const sendInput = () => {
       socket.emit('player_input', {
@@ -174,7 +168,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     const interval = setInterval(sendInput, 33); // 30 FPS
     
     return () => clearInterval(interval);
-  }, [socket, isConnected, publicKey]);
+  }, [socket, isConnected, publicKey, isPlayerDead]);
   
   // Mouse handling
   const handleMouseMove = useCallback((e) => {
@@ -229,17 +223,6 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isPlayerDead]);
   
-  // Handle respawn
-  const handleRespawn = () => {
-    if (!canRespawn || !socket) return;
-    
-    socket.emit('respawn', {
-      playerAddress: publicKey.toString()
-    });
-    
-    setIsPlayerDead(false);
-  };
-  
   // Handle cash out
   const handleCashOut = async () => {
     if (!playerView || !playerView.player || isCashingOut) return;
@@ -286,8 +269,8 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
     return (lamports / 1000000000).toFixed(4);
   };
   
-  // Show loading screen if no player view yet
-  if (!playerView) {
+  // Show loading screen if no player view yet and not dead
+  if (!playerView && !isPlayerDead) {
     return (
       <div className="game-container">
         <div style={{
@@ -308,117 +291,106 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
   
   return (
     <div className="game-container">
-      {/* Game UI */}
-      <div className="game-ui">
-        {/* Leaderboard */}
-        <div className="leaderboard">
-          <h3>Leaderboard</h3>
-          {gameState?.leaderboard?.map((player, index) => (
-            <div key={player.address} className="leaderboard-item">
-              <span className="rank">{player.rank}.</span>
-              <span className="nickname">{player.nickname}</span>
-              <span className="sol">{player.solDisplay} SOL</span>
+      {/* Game UI - only show if player is alive */}
+      {playerView && !isPlayerDead && (
+        <div className="game-ui">
+          {/* Leaderboard */}
+          <div className="leaderboard">
+            <h3>Leaderboard</h3>
+            {gameState?.leaderboard?.map((player, index) => (
+              <div key={player.address} className="leaderboard-item">
+                <span className="rank">{player.rank}.</span>
+                <span className="nickname">{player.nickname}</span>
+                <span className="sol">{player.solDisplay} SOL</span>
+              </div>
+            ))}
+          </div>
+          
+          {/* Player info */}
+          {playerView?.player && (
+            <div className="player-info">
+              <div className="info-item">
+                <span>Your Value:</span>
+                <span className="value sol-value">
+                  {formatSol(playerView.player.solValue)} SOL
+                </span>
+              </div>
+              <div className="info-item">
+                <span>Mass:</span>
+                <span className="value">{Math.floor(playerView.player.mass)}</span>
+              </div>
+              <div className="info-item">
+                <span>Players Eaten:</span>
+                <span className="value">{playerView.player.playersEaten || 0}</span>
+              </div>
+              <div className="info-item">
+                <span>Position:</span>
+                <span className="value">
+                  {Math.floor(playerView.player.x)}, {Math.floor(playerView.player.y)}
+                </span>
+              </div>
             </div>
-          ))}
+          )}
+          
+          {/* Game stats */}
+          {gameState && (
+            <div className="game-info">
+              <div className="info-item">
+                <span>Active Players:</span>
+                <span className="value">{gameState.playerCount}</span>
+              </div>
+              <div className="info-item">
+                <span>Total SOL in Game:</span>
+                <span className="value">{gameState.totalSolDisplay} SOL</span>
+              </div>
+            </div>
+          )}
+          
+          {/* Controls */}
+          <div className="controls">
+            <div className="control-item">
+              <kbd>Mouse</kbd> - Move
+            </div>
+            <div className="control-item">
+              <kbd>Space</kbd> - Boost (-10% mass)
+            </div>
+            <div className="control-item">
+              <kbd>W</kbd> - Eject mass
+            </div>
+          </div>
+          
+          {/* Cash out button */}
+          {playerView?.player && playerView.player.isAlive && (
+            <button 
+              className="cash-out-btn"
+              onClick={handleCashOut}
+              disabled={isCashingOut}
+            >
+              💰 Cash Out ({formatSol(playerView.player.solValue)} SOL)
+            </button>
+          )}
         </div>
-        
-        {/* Player info */}
-        {playerView?.player && (
-          <div className="player-info">
-            <div className="info-item">
-              <span>Your Value:</span>
-              <span className="value sol-value">
-                {formatSol(playerView.player.solValue)} SOL
-              </span>
-            </div>
-            <div className="info-item">
-              <span>Mass:</span>
-              <span className="value">{Math.floor(playerView.player.mass)}</span>
-            </div>
-            <div className="info-item">
-              <span>Players Eaten:</span>
-              <span className="value">{playerView.player.playersEaten || 0}</span>
-            </div>
-            <div className="info-item">
-              <span>Position:</span>
-              <span className="value">
-                {Math.floor(playerView.player.x)}, {Math.floor(playerView.player.y)}
-              </span>
-            </div>
-          </div>
-        )}
-        
-        {/* Game stats */}
-        {gameState && (
-          <div className="game-info">
-            <div className="info-item">
-              <span>Active Players:</span>
-              <span className="value">{gameState.playerCount}</span>
-            </div>
-            <div className="info-item">
-              <span>Total SOL in Game:</span>
-              <span className="value">{gameState.totalSolDisplay} SOL</span>
-            </div>
-          </div>
-        )}
-        
-        {/* Controls */}
-        <div className="controls">
-          <div className="control-item">
-            <kbd>Mouse</kbd> - Move
-          </div>
-          <div className="control-item">
-            <kbd>Space</kbd> - Boost (-10% mass)
-          </div>
-          <div className="control-item">
-            <kbd>W</kbd> - Eject mass
-          </div>
-        </div>
-        
-        {/* Cash out button */}
-        {playerView?.player && playerView.player.isAlive && (
-          <button 
-            className="cash-out-btn"
-            onClick={handleCashOut}
-            disabled={isCashingOut}
-          >
-            💰 Cash Out ({formatSol(playerView.player.solValue)} SOL)
-          </button>
-        )}
-      </div>
+      )}
       
-      {/* Game canvas */}
-      <Canvas
-        ref={canvasRef}
-        playerView={playerView}
-        onMouseMove={handleMouseMove}
-      />
+      {/* Game canvas - only show if player is alive */}
+      {playerView && !isPlayerDead && (
+        <Canvas
+          ref={canvasRef}
+          playerView={playerView}
+          onMouseMove={handleMouseMove}
+        />
+      )}
       
-      {/* Death screen */}
+      {/* Death screen - nowa wersja bez respawnu */}
       {isPlayerDead && (
         <div className="death-overlay">
           <div className="death-content">
-            <h1>You were eaten!</h1>
-            {canRespawn && playerView?.player ? (
-              <>
-                <p>You still have {formatSol(playerView.player.solValue)} SOL</p>
-                <div className="death-options">
-                  <button className="respawn-btn" onClick={handleRespawn}>
-                    Respawn
-                  </button>
-                  <button className="cash-out-death-btn" onClick={handleCashOut}>
-                    Cash Out & Leave
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p>You lost all your SOL!</p>
-                <button className="leave-btn" onClick={onLeaveGame}>
-                  Back to Menu
-                </button>
-              </>
-            )}
+            <h1>Game Over!</h1>
+            <p className="death-reason">{deathReason}</p>
+            <p>You lost all your SOL!</p>
+            <button className="leave-btn" onClick={onLeaveGame}>
+              Back to Menu
+            </button>
           </div>
         </div>
       )}
@@ -465,10 +437,12 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
         </div>
       )}
       
-      {/* Exit button */}
-      <button className="exit-btn" onClick={onLeaveGame}>
-        Leave Game
-      </button>
+      {/* Exit button - tylko jeśli gracz żyje */}
+      {playerView && !isPlayerDead && (
+        <button className="exit-btn" onClick={onLeaveGame}>
+          Leave Game
+        </button>
+      )}
     </div>
   );
 }

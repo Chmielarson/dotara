@@ -20,7 +20,7 @@ const GAME_SERVER_URL = 'http://localhost:3001';
 console.log('Using game server URL:', GAME_SERVER_URL);
 
 // Program ID - ZAKTUALIZUJ PO DEPLOYU!
-const PROGRAM_ID = new PublicKey('7vEFGgPDdATrHR7WqQk3sfAxkgFwyoM9tJVGndFpVhyr');
+const PROGRAM_ID = new PublicKey('7rw6uErfMmgnwZWs3UReFGc1aBtbM152WkV8kudY9aMd');
 const PLATFORM_FEE_WALLET = new PublicKey('FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8');
 
 console.log('Solana configuration loaded:', {
@@ -116,7 +116,8 @@ export async function checkPlayerState(wallet) {
       exists: true,
       isActive,
       currentValue: Number(currentValue) / LAMPORTS_PER_SOL,
-      stakeAmount: Number(stakeAmount) / LAMPORTS_PER_SOL
+      stakeAmount: Number(stakeAmount) / LAMPORTS_PER_SOL,
+      currentValueLamports: Number(currentValue)
     };
   } catch (error) {
     console.error('Error checking player state:', error);
@@ -346,23 +347,24 @@ export async function cashOut(wallet) {
   const [gamePDA] = await findGlobalGamePDA();
   const [playerStatePDA] = await findPlayerStatePDA(publicKey);
   
-  // Pobierz aktualny stan gracza
-  const playerStateAccount = await connection.getAccountInfo(playerStatePDA);
-  if (!playerStateAccount) {
+  // Pobierz aktualny stan gracza PRZED cash out
+  const playerState = await checkPlayerState(wallet);
+  if (!playerState || !playerState.exists) {
     throw new Error('Player state not found');
   }
   
-  // Parsuj wartość gracza
-  const currentValue = playerStateAccount.data.readBigUInt64LE(40);
-  const currentValueSol = Number(currentValue) / LAMPORTS_PER_SOL;
+  // Użyj aktualnej wartości gracza z blockchain
+  const currentValueLamports = playerState.currentValueLamports || 0;
+  const currentValueSol = playerState.currentValue || 0;
   
-  if (currentValue === 0n) {
+  if (currentValueLamports === 0) {
     throw new Error('You have no SOL to cash out');
   }
   
   console.log('Cashing out:', {
-    currentValue: currentValue.toString(),
-    currentValueSol
+    currentValueLamports,
+    currentValueSol,
+    playerState
   });
   
   const data = serializeCashOutData();
