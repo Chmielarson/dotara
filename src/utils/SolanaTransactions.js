@@ -15,8 +15,7 @@ const NETWORK = 'devnet';
 const connection = new Connection(clusterApiUrl(NETWORK), 'confirmed');
 
 // Hardcoded URL
-const GAME_SERVER_URL = 'http://localhost:3001';
-
+const GAME_SERVER_URL = import.meta.env.VITE_GAME_SERVER_URL || 'http://localhost:3001';
 console.log('Using game server URL:', GAME_SERVER_URL);
 
 // Program ID - ZAKTUALIZUJ PO DEPLOYU!
