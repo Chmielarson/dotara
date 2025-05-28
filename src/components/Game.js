@@ -401,14 +401,22 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
         />
       )}
       
-      {/* Death screen - nowa wersja bez respawnu */}
+      {/* Death screen - poprawione */}
       {isPlayerDead && (
         <div className="death-overlay">
           <div className="death-content">
             <h1>Game Over!</h1>
             <p className="death-reason">{deathReason}</p>
             <p>You lost all your SOL!</p>
-            <button className="leave-btn" onClick={onLeaveGame}>
+            <button 
+              className="leave-btn" 
+              onClick={() => {
+                // Wyczyść stan lokalny
+                localStorage.removeItem('dotara_io_game_state');
+                // Wróć do menu
+                onLeaveGame();
+              }}
+            >
               Back to Menu
             </button>
           </div>

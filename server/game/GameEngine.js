@@ -128,17 +128,10 @@ class GameEngine {
     if (player) {
       // Gracz już istnieje
       if (!player.isAlive) {
-        // Gracz był zjedzony - jeśli ma nową stawkę, pozwól na nową grę
-        if (initialStake > 0) {
-          // Usuń starego martwego gracza
-          this.players.delete(playerAddress);
-          console.log(`Player ${playerAddress} was dead - removing old instance for fresh start with stake: ${initialStake}`);
-          // Kontynuuj tworzenie nowego gracza poniżej
-        } else {
-          // Gracz próbuje dołączyć bez nowej stawki po śmierci
-          console.log(`Player ${playerAddress} tried to rejoin without new stake after death - rejecting`);
-          return null;
-        }
+        // Gracz był zjedzony - usuń go całkowicie przed nową grą
+        this.players.delete(playerAddress);
+        console.log(`Player ${playerAddress} was dead - removing for fresh start with stake: ${initialStake}`);
+        // Kontynuuj tworzenie nowego gracza poniżej
       } else {
         // Gracz żyje - zwróć istniejącego gracza
         console.log(`Player ${playerAddress} already in game and alive`);
@@ -182,19 +175,30 @@ class GameEngine {
     if (!player) return null;
     
     if (cashOut) {
-      // Gracz wypłaca i wychodzi
+      // Cash out - usuń całkowicie
       this.totalSolInGame -= player.solValue;
       this.totalPlayersCashedOut++;
       this.players.delete(playerAddress);
       console.log(`Player ${playerAddress} cashed out with ${player.solValue} lamports from Zone ${player.currentZone}`);
       return player;
     } else {
-      // Gracz został zjedzony - oznacz jako nieaktywny ale NIE usuwaj
+      // Zjedzony - oznacz jako nieaktywny
       player.isAlive = false;
       player.mass = 0;
+      const lostValue = player.solValue;
+      player.solValue = 0; // Stracił wszystko
       this.convertPlayerToFood(player);
-      this.totalSolInGame -= player.solValue; // SOL został przekazany innemu graczowi
-      console.log(`Player ${playerAddress} was eaten and marked as dead`);
+      this.totalSolInGame -= lostValue; // SOL został przekazany innemu graczowi
+      
+      // Usuń gracza całkowicie po 5 sekundach
+      setTimeout(() => {
+        if (this.players.has(playerAddress) && !this.players.get(playerAddress).isAlive) {
+          this.players.delete(playerAddress);
+          console.log(`Player ${playerAddress} removed after death timeout`);
+        }
+      }, 5000);
+      
+      console.log(`Player ${playerAddress} was eaten and marked as dead, will be removed in 5s`);
       return player;
     }
   }

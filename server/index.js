@@ -311,7 +311,7 @@ io.on('connection', (socket) => {
     io.to('lobby').emit('new_chat_message', chatMessage);
   });
   
-  // Game handlers
+  // Game handlers - POPRAWIONA LOGIKA
   socket.on('join_game', ({ playerAddress, nickname, initialStake }) => {
     console.log('Join game request:', { playerAddress, nickname, initialStake });
     
@@ -321,19 +321,15 @@ io.on('connection', (socket) => {
     if (existingPlayer) {
       // Gracz już istnieje - sprawdź jego stan
       if (!existingPlayer.isAlive) {
-        // Gracz został zjedzony
-        if (initialStake === 0) {
-          // Próbuje dołączyć bez nowej stawki po śmierci
-          console.log(`Player ${playerAddress} was eaten and trying to rejoin without new stake`);
-          socket.emit('player_eliminated', {
-            playerAddress,
-            reason: 'You were eaten! Please join with a new stake to play again.'
-          });
-          return;
-        } else {
-          // Ma nową stawkę - pozwól na nową grę
-          console.log(`Player ${playerAddress} was eaten but has new stake - allowing fresh start`);
-          // Kontynuuj poniżej do utworzenia nowego gracza
+        // Gracz nie żyje - usuń go całkowicie przed nową grą
+        globalGame.players.delete(playerAddress);
+        console.log(`Removing dead player ${playerAddress} before new game`);
+        
+        // Usuń stare mapowania jeśli istnieją
+        const oldSocketId = playerSockets.get(playerAddress);
+        if (oldSocketId) {
+          playerSockets.delete(playerAddress);
+          socketPlayers.delete(oldSocketId);
         }
       } else {
         // Gracz żyje
