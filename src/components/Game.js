@@ -5,7 +5,7 @@ import Canvas from './Canvas';
 import { cashOut } from '../utils/SolanaTransactions';
 import './Game.css';
 
-export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
+export default function Game({ initialStake, nickname, onLeaveGame, setPendingCashOut, socket }) {
   const wallet = useWallet();
   const { publicKey } = wallet;
   
@@ -256,11 +256,16 @@ export default function Game({ initialStake, nickname, onLeaveGame, socket }) {
       socket.once('cash_out_initiated', async (data) => {
         if (data.success) {
           // Zapisz dane do cash out w localStorage
-          localStorage.setItem('dotara_io_pending_cashout', JSON.stringify({
+          const cashOutData = {
             playerAddress: publicKey.toString(),
             amount: data.amount,
             timestamp: Date.now()
-          }));
+          };
+          
+          localStorage.setItem('dotara_io_pending_cashout', JSON.stringify(cashOutData));
+          
+          // Ustaw dane przed przekierowaniem
+          setPendingCashOut(cashOutData);
           
           // Przejdź do widoku cash out
           onLeaveGame(true); // true = pending cash out

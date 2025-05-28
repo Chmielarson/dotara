@@ -8,6 +8,19 @@ export default function CashOutScreen({ pendingCashOut, wallet, onComplete }) {
   const [error, setError] = useState('');
   const [txSignature, setTxSignature] = useState('');
   
+  // Zabezpieczenie przed brakiem danych
+  if (!pendingCashOut || !pendingCashOut.amount) {
+    return (
+      <div className="cashout-screen">
+        <div className="cashout-container">
+          <h1>Error</h1>
+          <p>No pending cash out found. Redirecting...</p>
+          {setTimeout(() => onComplete(), 2000)}
+        </div>
+      </div>
+    );
+  }
+  
   // Formatuj SOL
   const formatSol = (lamports) => {
     return (lamports / 1000000000).toFixed(4);

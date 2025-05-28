@@ -40,6 +40,11 @@ class Player {
     // Statystyki
     this.playersEaten = 0;
     this.totalSolEarned = 0;
+    
+    // Cash out status
+    this.isCashingOut = false; // Czy gracz jest w trakcie cash out
+    
+    console.log(`Player created: ${nickname} (${address}) with stake: ${initialStake} lamports`);
   }
   
   calculateRadius() {

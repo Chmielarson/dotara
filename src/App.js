@@ -1,10 +1,4 @@
-{currentView === 'cashout' && publicKey && pendingCashOut && (
-          <CashOutScreen
-            pendingCashOut={pendingCashOut}
-            wallet={wallet}
-            onComplete={handleCashOutComplete}
-          />
-        )}// src/App.js
+// src/App.js
 import React, { useState, useEffect, useMemo } from 'react';
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
@@ -31,6 +25,7 @@ function AppContent() {
   const [playerStake, setPlayerStake] = useState(0);
   const [playerNickname, setPlayerNickname] = useState('');
   const [pendingCashOut, setPendingCashOut] = useState(null);
+  const [isCheckingCashOut, setIsCheckingCashOut] = useState(true);
   
   // Initialize socket.io - use useMemo to prevent reconnection on every render
   const socket = useMemo(() => {
@@ -50,18 +45,34 @@ function AppContent() {
   
   // Check for pending cash out on mount
   useEffect(() => {
-    const pendingCashOutData = localStorage.getItem('dotara_io_pending_cashout');
-    if (pendingCashOutData && publicKey) {
-      const data = JSON.parse(pendingCashOutData);
+    const checkPendingCashOut = () => {
+      const pendingCashOutData = localStorage.getItem('dotara_io_pending_cashout');
       
-      if (data.playerAddress === publicKey.toString()) {
-        // Gracz ma oczekującą wypłatę
-        setPendingCashOut(data);
-        setCurrentView('cashout');
-      } else {
-        // Inne konto - usuń stare dane
-        localStorage.removeItem('dotara_io_pending_cashout');
+      if (pendingCashOutData && publicKey) {
+        try {
+          const data = JSON.parse(pendingCashOutData);
+          
+          if (data.playerAddress === publicKey.toString()) {
+            // Gracz ma oczekującą wypłatę
+            setPendingCashOut(data);
+            setCurrentView('cashout');
+          } else {
+            // Inne konto - usuń stare dane
+            localStorage.removeItem('dotara_io_pending_cashout');
+          }
+        } catch (error) {
+          console.error('Error parsing pending cashout data:', error);
+          localStorage.removeItem('dotara_io_pending_cashout');
+        }
       }
+      
+      setIsCheckingCashOut(false);
+    };
+    
+    if (publicKey) {
+      checkPendingCashOut();
+    } else {
+      setIsCheckingCashOut(false);
     }
   }, [publicKey]);
   
@@ -97,7 +108,18 @@ function AppContent() {
   
   const handleLeaveGame = (hasPendingCashOut = false) => {
     if (hasPendingCashOut) {
-      setCurrentView('cashout');
+      // Pobierz dane z localStorage od razu przy przekierowaniu
+      const pendingCashOutData = localStorage.getItem('dotara_io_pending_cashout');
+      if (pendingCashOutData) {
+        try {
+          const data = JSON.parse(pendingCashOutData);
+          setPendingCashOut(data);
+          setCurrentView('cashout');
+        } catch (error) {
+          console.error('Error loading pending cashout:', error);
+          setCurrentView('join');
+        }
+      }
     } else {
       setCurrentView('join');
       setPlayerStake(0);
@@ -113,6 +135,24 @@ function AppContent() {
     setPlayerStake(0);
     setPlayerNickname('');
   };
+  
+  // Nie renderuj nic podczas sprawdzania
+  if (isCheckingCashOut) {
+    return (
+      <div className="app">
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100vh',
+          flexDirection: 'column'
+        }}>
+          <div className="spinner"></div>
+          <p style={{ marginTop: '20px', color: '#666' }}>Loading...</p>
+        </div>
+      </div>
+    );
+  }
   
   return (
     <div className="app">
@@ -146,7 +186,16 @@ function AppContent() {
             initialStake={playerStake}
             nickname={playerNickname}
             onLeaveGame={handleLeaveGame}
+            setPendingCashOut={setPendingCashOut}
             socket={socket}
+          />
+        )}
+        
+        {currentView === 'cashout' && publicKey && pendingCashOut && (
+          <CashOutScreen
+            pendingCashOut={pendingCashOut}
+            wallet={wallet}
+            onComplete={handleCashOutComplete}
           />
         )}
       </main>
