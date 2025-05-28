@@ -418,22 +418,33 @@ io.on('connection', (socket) => {
     // Oznacz gracza jako "cashing out" - to zapobiegnie zjedzeniu
     player.isCashingOut = true;
     
-    // Zapisz wartość gracza przed usunięciem
+    // WAŻNE: Zapisz AKTUALNĄ wartość gracza (po zjedzeniu innych)
     const cashOutAmount = player.solValue;
+    const cashOutAmountSol = cashOutAmount / 1000000000;
+    
+    console.log(`Player ${playerAddress} cashing out with:`);
+    console.log(`- Current value: ${cashOutAmount} lamports (${cashOutAmountSol} SOL)`);
+    console.log(`- Initial stake: ${player.initialStake} lamports`);
+    console.log(`- Players eaten: ${player.playersEaten}`);
+    console.log(`- Total earned: ${player.totalSolEarned} lamports`);
     
     // Usuń gracza z gry (ale zachowaj wartość)
-    globalGame.removePlayer(playerAddress, true);
+    const removedPlayer = globalGame.removePlayer(playerAddress, true);
     
     // Usuń mapowania socketów
     playerSockets.delete(playerAddress);
     socketPlayers.delete(socket.id);
     
-    console.log(`Player ${playerAddress} removed from game for cash out with ${cashOutAmount} lamports`);
-    
     socket.emit('cash_out_initiated', {
       success: true,
-      amount: cashOutAmount,
-      playerAddress
+      amount: cashOutAmount, // Przekaż AKTUALNĄ wartość!
+      playerAddress,
+      debug: {
+        initialStake: player.initialStake,
+        currentValue: cashOutAmount,
+        playersEaten: player.playersEaten,
+        totalEarned: player.totalSolEarned
+      }
     });
   });
   

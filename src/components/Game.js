@@ -255,10 +255,10 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
       // Czekaj na potwierdzenie usunięcia
       socket.once('cash_out_initiated', async (data) => {
         if (data.success) {
-          // Zapisz dane do cash out w localStorage
+          // Zapisz dane do cash out w localStorage - używaj wartości z serwera!
           const cashOutData = {
             playerAddress: publicKey.toString(),
-            amount: data.amount,
+            amount: data.amount, // Serwer zwraca aktualną wartość gracza
             timestamp: Date.now()
           };
           
@@ -410,11 +410,20 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
             <p>You lost all your SOL!</p>
             <button 
               className="leave-btn" 
-              onClick={() => {
-                // Wyczyść stan lokalny
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Back to menu clicked');
+                // Wyczyść wszystko
                 localStorage.removeItem('dotara_io_game_state');
-                // Wróć do menu
-                onLeaveGame();
+                localStorage.removeItem('dotara_io_pending_cashout');
+                // Użyj onLeaveGame jeśli działa, lub force redirect
+                try {
+                  onLeaveGame();
+                } catch (error) {
+                  console.error('Error leaving game:', error);
+                  window.location.href = '/';
+                }
               }}
             >
               Back to Menu
