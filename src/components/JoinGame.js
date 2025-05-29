@@ -62,7 +62,7 @@ export default function JoinGame({ onJoinGame, socket }) {
     };
   }, []);
   
-  // Fetch game stats and server authority
+  // Fetch game stats and server authority - FIXED: Always fetch, not just when initialized
   useEffect(() => {
     const fetchGameStats = async () => {
       try {
@@ -80,12 +80,11 @@ export default function JoinGame({ onJoinGame, socket }) {
       }
     };
     
-    if (gameInitialized) {
-      fetchGameStats();
-      const interval = setInterval(fetchGameStats, 5000); // Update every 5 seconds
-      return () => clearInterval(interval);
-    }
-  }, [gameInitialized]);
+    // ZAWSZE wykonuj fetchGameStats, nie tylko gdy gameInitialized
+    fetchGameStats();
+    const interval = setInterval(fetchGameStats, 5000); // Update every 5 seconds
+    return () => clearInterval(interval);
+  }, []); // Puste dependencies - wykonuj zawsze
   
   // Chat connection
   useEffect(() => {
