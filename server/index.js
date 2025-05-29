@@ -43,7 +43,7 @@ const io = new Server(server, {
 // Konfiguracja Solana
 const SOLANA_NETWORK = process.env.SOLANA_NETWORK || 'devnet';
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || clusterApiUrl(SOLANA_NETWORK);
-const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || 'C4KnupLUR9fLC12sckRY1QsNfb2eWDrfWQmHydLyMN8y');
+const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || 'ArRkSgypyvfSDdCxcQ6WdDAHGA1YeRtnmkRXA7ZHMrEb');
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 

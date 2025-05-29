@@ -19,7 +19,7 @@ const GAME_SERVER_URL = import.meta.env.VITE_GAME_SERVER_URL || 'http://localhos
 console.log('Using game server URL:', GAME_SERVER_URL);
 
 // Program ID - ZAKTUALIZUJ PO DEPLOYU!
-const PROGRAM_ID = new PublicKey('C4KnupLUR9fLC12sckRY1QsNfb2eWDrfWQmHydLyMN8y');
+const PROGRAM_ID = new PublicKey('ArRkSgypyvfSDdCxcQ6WdDAHGA1YeRtnmkRXA7ZHMrEb');
 const PLATFORM_FEE_WALLET = new PublicKey('FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8');
 
 console.log('Solana configuration loaded:', {

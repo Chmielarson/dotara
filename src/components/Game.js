@@ -18,6 +18,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
   const [showCashOutModal, setShowCashOutModal] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('Connecting...');
   const [deathReason, setDeathReason] = useState('');
+  const [combatCooldown, setCombatCooldown] = useState(0);
   
   const canvasRef = useRef(null);
   const inputRef = useRef({
@@ -26,6 +27,27 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
     split: false,
     eject: false
   });
+  
+  // Timer dla combat cooldown
+  useEffect(() => {
+    if (playerView?.player?.combatCooldownRemaining > 0) {
+      setCombatCooldown(playerView.player.combatCooldownRemaining);
+      
+      const timer = setInterval(() => {
+        setCombatCooldown(prev => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      
+      return () => clearInterval(timer);
+    } else {
+      setCombatCooldown(0);
+    }
+  }, [playerView?.player?.combatCooldownRemaining]);
   
   // Zapobiegaj przewijaniu strony podczas gry
   useEffect(() => {
@@ -98,7 +120,9 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
         playerAlive: view.player?.isAlive,
         playerPos: view.player ? `${Math.floor(view.player.x)}, ${Math.floor(view.player.y)}` : 'N/A',
         playersCount: view.players?.length || 0,
-        foodCount: view.food?.length || 0
+        foodCount: view.food?.length || 0,
+        canCashOut: view.player?.canCashOut,
+        combatCooldown: view.player?.combatCooldownRemaining
       });
       
       setPlayerView(view);
@@ -241,6 +265,12 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
       return;
     }
     
+    // Sprawdź combat cooldown
+    if (!playerView.player.canCashOut) {
+      console.log('Cannot cash out - in combat!');
+      return;
+    }
+    
     setShowCashOutModal(true);
   };
   
@@ -288,6 +318,50 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
   // Format SOL value
   const formatSol = (lamports) => {
     return (lamports / 1000000000).toFixed(4);
+  };
+  
+  // Render cash out button z timerem
+  const renderCashOutButton = () => {
+    if (!playerView?.player || !playerView.player.isAlive) return null;
+    
+    const canCashOut = playerView.player.canCashOut;
+    const cooldownRemaining = combatCooldown;
+    
+    if (!canCashOut && cooldownRemaining > 0) {
+      // Combat timer button
+      const progressWidth = (cooldownRemaining / 10) * 100;
+      
+      return (
+        <button 
+          className="cash-out-btn combat-timer"
+          disabled={true}
+          style={{
+            '--progress-width': `${progressWidth}%`
+          }}
+        >
+          <div className="timer-text">
+            <span>⚔️</span>
+            <span>Combat {cooldownRemaining}s</span>
+          </div>
+          <style jsx>{`
+            .cash-out-btn.combat-timer::before {
+              width: var(--progress-width);
+            }
+          `}</style>
+        </button>
+      );
+    }
+    
+    // Normal cash out button
+    return (
+      <button 
+        className="cash-out-btn"
+        onClick={handleCashOut}
+        disabled={isCashingOut || !canCashOut}
+      >
+        💰 Cash Out ({formatSol(playerView.player.solValue)} SOL)
+      </button>
+    );
   };
   
   // Show loading screen if no player view yet and not dead
@@ -375,17 +449,17 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
             </div>
           </div>
           
+          {/* Combat warning */}
+          {playerView?.player && !playerView.player.canCashOut && combatCooldown > 0 && (
+            <div className="combat-warning">
+              <span className="combat-warning-icon">⚔️</span>
+              <span>In combat! Cash out locked for {combatCooldown}s</span>
+            </div>
+          )}
+          
           {/* BOTTOM CENTER - Action buttons */}
           <div className="action-buttons">
-            {playerView?.player && playerView.player.isAlive && (
-              <button 
-                className="cash-out-btn"
-                onClick={handleCashOut}
-                disabled={isCashingOut}
-              >
-                💰 Cash Out ({formatSol(playerView.player.solValue)} SOL)
-              </button>
-            )}
+            {renderCashOutButton()}
             <button className="exit-btn" onClick={onLeaveGame}>
               Leave Game
             </button>

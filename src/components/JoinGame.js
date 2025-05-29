@@ -180,8 +180,9 @@ export default function JoinGame({ onJoinGame, socket }) {
       return;
     }
     
-    if (stakeAmount < 0.01 || stakeAmount > 10) {
-      setError('Stake must be between 0.01 and 10 SOL');
+    // ZMIANA: Minimum 0.05 SOL
+    if (stakeAmount < 0.05 || stakeAmount > 10) {
+      setError('Stake must be between 0.05 and 10 SOL');
       return;
     }
     
@@ -293,6 +294,12 @@ export default function JoinGame({ onJoinGame, socket }) {
                 <span className="label">Map Size</span>
                 <span className="value">{gameStats.mapSize}x{gameStats.mapSize}</span>
               </div>
+              {gameStats.targetFoodPerZone && (
+                <div className="stat-item">
+                  <span className="label">Food per Zone</span>
+                  <span className="value">{gameStats.targetFoodPerZone}</span>
+                </div>
+              )}
               {gameStats.serverWalletConfigured && (
                 <div className="stat-item" style={{ color: '#27AE60' }}>
                   <span className="label">Blockchain Updates</span>
@@ -348,6 +355,12 @@ export default function JoinGame({ onJoinGame, socket }) {
                   <strong>Cash out</strong> anytime to claim your SOL
                 </div>
               </li>
+              <li>
+                <span className="icon">⚡</span>
+                <div>
+                  <strong>Start mass</strong> = 20 + (SOL × 1000)
+                </div>
+              </li>
             </ul>
           </div>
         </div>
@@ -379,12 +392,12 @@ export default function JoinGame({ onJoinGame, socket }) {
                     type="number"
                     value={stakeAmount}
                     onChange={(e) => setStakeAmount(parseFloat(e.target.value) || 0)}
-                    min="0.01"
+                    min="0.05"
                     max="10"
                     step="0.01"
                     disabled={isJoining}
                   />
-                  <span className="hint">Min: 0.01 SOL, Max: 10 SOL</span>
+                  <span className="hint">Min: 0.05 SOL, Max: 10 SOL</span>
                 </label>
               </div>
               
@@ -392,6 +405,10 @@ export default function JoinGame({ onJoinGame, socket }) {
                 <div className="info-item">
                   <span>Your buy-in:</span>
                   <span className="value">{stakeAmount} SOL</span>
+                </div>
+                <div className="info-item">
+                  <span>Starting mass:</span>
+                  <span className="value">{20 + (stakeAmount * 1000)}</span>
                 </div>
                 <div className="info-item">
                   <span>Platform fee (5%):</span>

@@ -55,7 +55,7 @@ impl GlobalGame {
             active_players: 0,
             total_players: 0,
             created_at,
-            min_stake: 10_000_000,    // 0.01 SOL minimum
+            min_stake: 50_000_000,     // ZMIANA: 0.05 SOL minimum
             max_stake: 10_000_000_000, // 10 SOL maximum
             platform_fee_percent: 5,   // 5% prowizji
             server_authority,          // Zapisz adres serwera

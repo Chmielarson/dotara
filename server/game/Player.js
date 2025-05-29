@@ -7,7 +7,9 @@ class Player {
     this.y = y;
     
     // Rozdzielenie masy i wartości SOL
-    this.mass = 20; // Masa startowa (tylko wpływa na rozmiar)
+    // ZMIANA: Masa startowa zależy od stake - 1 SOL = 1000 masy
+    const stakeSol = initialStake / 1000000000; // Konwersja na SOL
+    this.mass = 20 + (stakeSol * 1000); // Bazowa masa 20 + 1000 per SOL
     this.solValue = initialStake; // Wartość w SOL (w lamports)
     this.initialStake = initialStake; // Ile gracz wniósł na start
     
@@ -37,6 +39,10 @@ class Player {
     this.splitCooldown = 3000; // 3 sekundy
     this.ejectCooldown = 100; // 100ms
     
+    // NOWE: Combat log
+    this.lastCombatTime = 0;
+    this.combatCooldown = 10000; // 10 sekund
+    
     // Statystyki
     this.playersEaten = 0;
     this.totalSolEarned = 0;
@@ -44,7 +50,7 @@ class Player {
     // Cash out status
     this.isCashingOut = false; // Czy gracz jest w trakcie cash out
     
-    console.log(`Player created: ${nickname} (${address}) with stake: ${initialStake} lamports`);
+    console.log(`Player created: ${nickname} (${address}) with stake: ${initialStake} lamports (${stakeSol} SOL), starting mass: ${this.mass}`);
   }
   
   calculateRadius() {
@@ -77,6 +83,33 @@ class Player {
   setTarget(x, y) {
     this.targetX = x;
     this.targetY = y;
+  }
+  
+  // NOWA METODA: Oznacz walkę
+  enterCombat() {
+    this.lastCombatTime = Date.now();
+    console.log(`Player ${this.address} entered combat, cash out locked for 10s`);
+  }
+  
+  // NOWA METODA: Sprawdź czy gracz może zrobić cash out
+  canCashOut() {
+    if (!this.isAlive || this.isCashingOut) return false;
+    
+    const now = Date.now();
+    const timeSinceCombat = now - this.lastCombatTime;
+    return timeSinceCombat >= this.combatCooldown;
+  }
+  
+  // NOWA METODA: Pobierz pozostały czas combat log
+  getCombatCooldownRemaining() {
+    const now = Date.now();
+    const timeSinceCombat = now - this.lastCombatTime;
+    
+    if (timeSinceCombat >= this.combatCooldown) {
+      return 0;
+    }
+    
+    return Math.ceil((this.combatCooldown - timeSinceCombat) / 1000); // W sekundach
   }
   
   update(deltaTime, mapSize) {
@@ -239,7 +272,9 @@ class Player {
       currentValueSol: this.getCurrentValueInSol(),
       playersEaten: this.playersEaten,
       currentZone: this.currentZone,
-      canAdvanceToZone: this.canAdvanceToZone
+      canAdvanceToZone: this.canAdvanceToZone,
+      canCashOut: this.canCashOut(),
+      combatCooldownRemaining: this.getCombatCooldownRemaining()
     };
   }
 }
