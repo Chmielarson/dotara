@@ -26,9 +26,14 @@ export default function CashOutScreen({ pendingCashOut, wallet, onComplete }) {
     return (lamports / 1000000000).toFixed(4);
   };
   
+  // Użyj wartości z pendingCashOut (która zawiera aktualną wartość gracza)
   const amountSol = formatSol(pendingCashOut.amount);
   const platformFee = (amountSol * 0.05).toFixed(4);
   const playerReceives = (amountSol * 0.95).toFixed(4);
+  
+  console.log('CashOutScreen - pendingCashOut:', pendingCashOut);
+  console.log('CashOutScreen - amount in lamports:', pendingCashOut.amount);
+  console.log('CashOutScreen - amount in SOL:', amountSol);
   
   // Zapobiegaj cofnięciu lub odświeżeniu
   useEffect(() => {

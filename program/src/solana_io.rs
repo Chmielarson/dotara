@@ -39,14 +39,15 @@ pub struct GlobalGame {
     pub min_stake: u64,             // 8 bajtów - minimalna stawka
     pub max_stake: u64,             // 8 bajtów - maksymalna stawka
     pub platform_fee_percent: u8,    // 1 bajt - procent prowizji
+    pub server_authority: Pubkey,    // 32 bajty - adres serwera z uprawnieniami
 }
 
 impl GlobalGame {
-    pub const SIZE: usize = 256; // Zmniejszone z 512 na 256
+    pub const SIZE: usize = 256; // Rozmiar z dodatkowym polem
     pub const HEADER_SIZE: usize = 4;
     pub const MAX_PLAYERS: usize = 1000; // Maksymalna liczba graczy
     
-    pub fn new(created_at: i64) -> Self {
+    pub fn new(created_at: i64, server_authority: Pubkey) -> Self {
         Self {
             is_initialized: true,
             total_pool: 0,
@@ -57,6 +58,7 @@ impl GlobalGame {
             min_stake: 10_000_000,    // 0.01 SOL minimum
             max_stake: 10_000_000_000, // 10 SOL maximum
             platform_fee_percent: 5,   // 5% prowizji
+            server_authority,          // Zapisz adres serwera
         }
     }
     
@@ -106,7 +108,9 @@ impl GlobalGame {
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub enum SolanaIoInstruction {
     /// Inicjalizuje globalną grę (tylko raz)
-    InitializeGame,
+    InitializeGame {
+        server_authority: Pubkey, // Adres serwera z uprawnieniami
+    },
     
     /// Gracz dołącza do gry z określoną stawką
     JoinGame {
@@ -128,6 +132,7 @@ pub enum SolanaIoInstruction {
         min_stake: Option<u64>,
         max_stake: Option<u64>,
         platform_fee_percent: Option<u8>,
+        new_server_authority: Option<Pubkey>,
     },
 }
 
@@ -140,9 +145,9 @@ pub fn process_instruction(
     let instruction = SolanaIoInstruction::try_from_slice(input)?;
     
     match instruction {
-        SolanaIoInstruction::InitializeGame => {
-            msg!("Initializing Solana.io global game");
-            process_initialize_game(program_id, accounts)
+        SolanaIoInstruction::InitializeGame { server_authority } => {
+            msg!("Initializing Solana.io global game with server authority: {}", server_authority);
+            process_initialize_game(program_id, accounts, server_authority)
         },
         SolanaIoInstruction::JoinGame { stake_amount } => {
             msg!("Player joining game with stake: {} lamports", stake_amount);
@@ -156,9 +161,9 @@ pub fn process_instruction(
             msg!("Player cashing out");
             process_cash_out(program_id, accounts)
         },
-        SolanaIoInstruction::UpdateGameParams { min_stake, max_stake, platform_fee_percent } => {
+        SolanaIoInstruction::UpdateGameParams { min_stake, max_stake, platform_fee_percent, new_server_authority } => {
             msg!("Updating game parameters");
-            process_update_game_params(program_id, accounts, min_stake, max_stake, platform_fee_percent)
+            process_update_game_params(program_id, accounts, min_stake, max_stake, platform_fee_percent, new_server_authority)
         },
     }
 }
@@ -166,6 +171,7 @@ pub fn process_instruction(
 fn process_initialize_game(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
+    server_authority: Pubkey,
 ) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     
@@ -215,13 +221,13 @@ fn process_initialize_game(
         &[&[b"global_game".as_ref(), &[bump_seed]]],
     )?;
     
-    // Inicjalizuj dane gry
+    // Inicjalizuj dane gry z server authority
     let clock = Clock::get()?;
-    let game = GlobalGame::new(clock.unix_timestamp);
+    let game = GlobalGame::new(clock.unix_timestamp, server_authority);
     
     game.to_account_data(&mut game_account.data.borrow_mut())?;
     
-    msg!("Global game initialized successfully");
+    msg!("Global game initialized successfully with server authority: {}", server_authority);
     Ok(())
 }
 
@@ -375,7 +381,15 @@ fn process_update_player_value(
         return Err(ProgramError::MissingRequiredSignature);
     }
     
-    // TODO: Dodać weryfikację authority (np. serwer gry)
+    // Załaduj grę i sprawdź czy to autoryzowany serwer
+    let game = GlobalGame::from_account_data(&game_account.data.borrow())?;
+    
+    // Weryfikacja authority - tylko zapisany serwer może aktualizować
+    if *authority_account.key != game.server_authority {
+        msg!("Unauthorized: Only server authority can update player values");
+        msg!("Expected: {}, Got: {}", game.server_authority, authority_account.key);
+        return Err(ProgramError::InvalidAccountData);
+    }
     
     // Załaduj stany graczy
     let mut player_state = PlayerState::try_from_slice(&player_state_account.data.borrow())?;
@@ -385,10 +399,13 @@ fn process_update_player_value(
         return Err(ProgramError::InvalidAccountData);
     }
     
-    // Transfer wartości
+    // Transfer wartości - WAŻNE: dodaj wartość do gracza który zjadł
     player_state.current_value += eaten_value;
     eaten_player_state.current_value = 0;
     eaten_player_state.is_active = false;
+    
+    msg!("Player gained {} lamports from eating. New value: {} lamports", 
+         eaten_value, player_state.current_value);
     
     // Zapisz zmiany
     player_state.serialize(&mut &mut player_state_account.data.borrow_mut()[..])?;
@@ -399,7 +416,7 @@ fn process_update_player_value(
     game.active_players = game.active_players.saturating_sub(1);
     game.to_account_data(&mut game_account.data.borrow_mut())?;
     
-    msg!("Player gained {} lamports from eating another player", eaten_value);
+    msg!("Player value updated successfully by authorized server");
     Ok(())
 }
 
@@ -484,6 +501,7 @@ fn process_update_game_params(
     min_stake: Option<u64>,
     max_stake: Option<u64>,
     platform_fee_percent: Option<u8>,
+    new_server_authority: Option<Pubkey>,
 ) -> ProgramResult {
     let accounts_iter = &mut accounts.iter();
     
@@ -494,10 +512,13 @@ fn process_update_game_params(
         return Err(ProgramError::MissingRequiredSignature);
     }
     
-    // TODO: Dodać weryfikację że to rzeczywiście admin
-    // Na razie zakładamy że pierwszy inicjalizator to admin
-    
     let mut game = GlobalGame::from_account_data(&game_account.data.borrow())?;
+    
+    // Tylko server authority może aktualizować parametry
+    if *admin_account.key != game.server_authority {
+        msg!("Unauthorized: Only server authority can update game params");
+        return Err(ProgramError::InvalidAccountData);
+    }
     
     if let Some(min) = min_stake {
         game.min_stake = min;
@@ -512,6 +533,11 @@ fn process_update_game_params(
             return Err(ProgramError::InvalidArgument);
         }
         game.platform_fee_percent = fee;
+    }
+    
+    if let Some(new_authority) = new_server_authority {
+        game.server_authority = new_authority;
+        msg!("Server authority updated to: {}", new_authority);
     }
     
     game.to_account_data(&mut game_account.data.borrow_mut())?;

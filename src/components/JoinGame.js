@@ -1,6 +1,7 @@
 // src/components/JoinGame.js
 import React, { useState, useEffect } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
+import { PublicKey } from '@solana/web3.js';
 import { joinGlobalGame, initializeGlobalGame, checkGlobalGameState } from '../utils/SolanaTransactions';
 import './JoinGame.css';
 
@@ -16,6 +17,7 @@ export default function JoinGame({ onJoinGame, socket }) {
   const [gameInitialized, setGameInitialized] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [checkingGame, setCheckingGame] = useState(true);
+  const [serverAuthority, setServerAuthority] = useState(null);
   
   // Chat state
   const [messages, setMessages] = useState([]);
@@ -60,7 +62,7 @@ export default function JoinGame({ onJoinGame, socket }) {
     };
   }, []);
   
-  // Fetch game stats
+  // Fetch game stats and server authority
   useEffect(() => {
     const fetchGameStats = async () => {
       try {
@@ -68,6 +70,11 @@ export default function JoinGame({ onJoinGame, socket }) {
         const response = await fetch(`${GAME_SERVER_URL}/api/game/status`);
         const data = await response.json();
         setGameStats(data);
+        
+        // Zapisz server authority
+        if (data.serverWalletAddress) {
+          setServerAuthority(new PublicKey(data.serverWalletAddress));
+        }
       } catch (error) {
         console.error('Error fetching game stats:', error);
       }
@@ -137,17 +144,22 @@ export default function JoinGame({ onJoinGame, socket }) {
       return;
     }
     
+    if (!serverAuthority) {
+      setError('Server authority not found. Is the server running?');
+      return;
+    }
+    
     try {
       setIsInitializing(true);
       setError('');
       
-      const result = await initializeGlobalGame(wallet);
+      const result = await initializeGlobalGame(wallet, serverAuthority);
       
       if (result.alreadyInitialized) {
         setError('Game is already initialized');
         setGameInitialized(true);
       } else {
-        alert('Global game initialized successfully!');
+        alert(`Global game initialized successfully with server authority: ${serverAuthority.toString()}`);
         setGameInitialized(true);
       }
     } catch (error) {
@@ -211,6 +223,11 @@ export default function JoinGame({ onJoinGame, socket }) {
                 This is a one-time setup that creates the global game account on the blockchain. 
                 After initialization, all players can join and play in the same persistent world.
               </p>
+              {serverAuthority && (
+                <p style={{ marginTop: '15px', fontSize: '14px', color: '#7F8C8D' }}>
+                  Server authority: {formatAddress(serverAuthority.toString())}
+                </p>
+              )}
             </div>
             
             {error && (
@@ -222,16 +239,21 @@ export default function JoinGame({ onJoinGame, socket }) {
             <button 
               className="join-button"
               onClick={handleInitializeGame}
-              disabled={isInitializing || !publicKey}
-              style={{ marginBottom: '20px' }}
+              disabled={isInitializing || !publicKey || !serverAuthority}
             >
               {isInitializing ? 'Initializing...' : 
                !publicKey ? 'Connect Wallet First' : 
+               !serverAuthority ? 'Waiting for Server...' :
                'Initialize Global Game'}
             </button>
             
-            <div style={{ textAlign: 'center', color: '#7F8C8D', fontSize: '14px' }}>
+            <div style={{ textAlign: 'center', color: '#7F8C8D', fontSize: '14px', marginTop: '20px' }}>
               <p>Note: Only needs to be done once per program deployment</p>
+              {!serverAuthority && (
+                <p style={{ color: '#E74C3C', fontWeight: 700 }}>
+                  ⚠️ Server not detected. Make sure the game server is running.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -272,6 +294,12 @@ export default function JoinGame({ onJoinGame, socket }) {
                 <span className="label">Map Size</span>
                 <span className="value">{gameStats.mapSize}x{gameStats.mapSize}</span>
               </div>
+              {gameStats.serverWalletConfigured && (
+                <div className="stat-item" style={{ color: '#27AE60' }}>
+                  <span className="label">Blockchain Updates</span>
+                  <span className="value">✓ Enabled</span>
+                </div>
+              )}
               
               {gameStats.leaderboard && gameStats.leaderboard.length > 0 && (
                 <div className="mini-leaderboard">

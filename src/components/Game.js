@@ -119,6 +119,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
         setPlayerView(null); // Clear player view since they're out of the game
         // Clear saved game state
         localStorage.removeItem('dotara_io_game_state');
+        localStorage.removeItem('dotara_io_pending_cashout');
       }
     };
     

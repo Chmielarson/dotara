@@ -14,6 +14,7 @@ const {
   sendAndConfirmTransaction
 } = require('@solana/web3.js');
 const fs = require('fs');
+const bs58 = require('bs58');
 const GameEngine = require('./game/GameEngine');
 
 dotenv.config();
@@ -42,17 +43,38 @@ const io = new Server(server, {
 // Konfiguracja Solana
 const SOLANA_NETWORK = process.env.SOLANA_NETWORK || 'devnet';
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || clusterApiUrl(SOLANA_NETWORK);
-const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || '7rw6uErfMmgnwZWs3UReFGc1aBtbM152WkV8kudY9aMd');
+const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || 'C4KnupLUR9fLC12sckRY1QsNfb2eWDrfWQmHydLyMN8y');
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
-// Załaduj server wallet jeśli istnieje
+// Załaduj server wallet
 let serverWallet = null;
 try {
-  if (process.env.SERVER_WALLET_PATH && fs.existsSync(process.env.SERVER_WALLET_PATH)) {
+  // Priorytet 1: Private key z .env
+  if (process.env.SERVER_WALLET_PRIVATE_KEY) {
+    try {
+      // Dekoduj private key z base58
+      const privateKey = bs58.decode(process.env.SERVER_WALLET_PRIVATE_KEY);
+      serverWallet = Keypair.fromSecretKey(privateKey);
+      console.log('Server wallet loaded from private key:', serverWallet.publicKey.toString());
+    } catch (error) {
+      console.error('Error decoding private key:', error);
+      console.log('Trying to parse as array...');
+      // Jeśli to jest tablica liczb w formacie JSON
+      try {
+        const privateKeyArray = JSON.parse(process.env.SERVER_WALLET_PRIVATE_KEY);
+        serverWallet = Keypair.fromSecretKey(new Uint8Array(privateKeyArray));
+        console.log('Server wallet loaded from array:', serverWallet.publicKey.toString());
+      } catch (parseError) {
+        console.error('Failed to parse private key:', parseError);
+      }
+    }
+  } 
+  // Priorytet 2: Keypair z pliku
+  else if (process.env.SERVER_WALLET_PATH && fs.existsSync(process.env.SERVER_WALLET_PATH)) {
     const walletData = JSON.parse(fs.readFileSync(process.env.SERVER_WALLET_PATH, 'utf8'));
     serverWallet = Keypair.fromSecretKey(new Uint8Array(walletData));
-    console.log('Server wallet loaded:', serverWallet.publicKey.toString());
+    console.log('Server wallet loaded from file:', serverWallet.publicKey.toString());
   } else {
     console.warn('No server wallet configured. Automatic blockchain updates disabled.');
   }
@@ -134,10 +156,15 @@ async function updatePlayerValueOnChain(eaterAddress, eatenAddress, eatenValue) 
 // Pojedyncza globalna instancja gry
 const globalGame = new GameEngine();
 
-// Ustaw callback dla aktualizacji blockchain
+// Ustaw callback dla aktualizacji blockchain - TERAZ BĘDZIE DZIAŁAĆ!
 globalGame.onPlayerEaten = async (eaterAddress, eatenAddress, eatenValue) => {
-  console.log('Player eaten callback triggered');
-  await updatePlayerValueOnChain(eaterAddress, eatenAddress, eatenValue);
+  console.log('Player eaten callback triggered - updating blockchain');
+  const signature = await updatePlayerValueOnChain(eaterAddress, eatenAddress, eatenValue);
+  if (signature) {
+    console.log('Blockchain update successful:', signature);
+  } else {
+    console.log('Blockchain update failed - continuing game anyway');
+  }
 };
 
 globalGame.start();
@@ -145,7 +172,8 @@ globalGame.start();
 console.log('Global game started with zone system:', {
   isRunning: globalGame.isRunning,
   mapSize: globalGame.mapSize,
-  zones: globalGame.zones.length
+  zones: globalGame.zones.length,
+  serverWalletConfigured: !!serverWallet
 });
 
 // Przechowywanie połączeń graczy
@@ -163,7 +191,9 @@ app.get('/api/game/status', (req, res) => {
   const gameState = globalGame.getGameState();
   res.json({
     status: 'active',
-    ...gameState
+    ...gameState,
+    serverWalletConfigured: !!serverWallet,
+    serverWalletAddress: serverWallet ? serverWallet.publicKey.toString() : null
   });
 });
 
@@ -262,7 +292,8 @@ app.get('/api/admin/active-players', (req, res) => {
   res.json({
     totalPlayers: players.length,
     totalSolInGame: (globalGame.totalSolInGame / 1000000000).toFixed(4),
-    players
+    players,
+    serverWallet: serverWallet ? serverWallet.publicKey.toString() : 'not configured'
   });
 });
 
@@ -311,7 +342,7 @@ io.on('connection', (socket) => {
     io.to('lobby').emit('new_chat_message', chatMessage);
   });
   
-  // Game handlers - POPRAWIONA LOGIKA
+  // Game handlers
   socket.on('join_game', ({ playerAddress, nickname, initialStake }) => {
     console.log('Join game request:', { playerAddress, nickname, initialStake });
     
@@ -544,7 +575,8 @@ function broadcastGameState() {
       totalPlayers: playerSockets.size,
       foodCount: gameState.foodCount,
       zoneStats: gameState.zoneStats,
-      offlinePlayersEaten: offlinePlayersEaten.length
+      offlinePlayersEaten: offlinePlayersEaten.length,
+      blockchainUpdatesEnabled: !!serverWallet
     });
   }
 }
@@ -560,7 +592,8 @@ setInterval(() => {
     totalPlayers: stats.totalPlayers,
     totalSolInGame: stats.totalSolDisplay,
     foodCount: stats.foodCount,
-    zones: stats.zoneStats
+    zones: stats.zoneStats,
+    serverWallet: serverWallet ? serverWallet.publicKey.toString() : 'not configured'
   });
 }, 60000);
 
@@ -571,5 +604,6 @@ server.listen(PORT, () => {
   console.log(`Connected to Solana ${SOLANA_NETWORK}`);
   console.log(`Program ID: ${PROGRAM_ID.toString()}`);
   console.log(`Server wallet: ${serverWallet ? serverWallet.publicKey.toString() : 'not configured'}`);
+  console.log(`Blockchain updates: ${serverWallet ? 'ENABLED' : 'DISABLED'}`);
   console.log('Global game is active with zone system!');
 });
