@@ -19,7 +19,7 @@ const GAME_SERVER_URL = import.meta.env.VITE_GAME_SERVER_URL || 'http://localhos
 console.log('Using game server URL:', GAME_SERVER_URL);
 
 // Program ID - ZAKTUALIZUJ PO DEPLOYU!
-const PROGRAM_ID = new PublicKey('C4KnupLUR9fLC12sckRY1QsNfb2eWDrfWQmHydLyMN8y');
+const PROGRAM_ID = new PublicKey('AaPU514d1iHKzdMyNtXhHgrf6g94qTTrXDyJqWpnSqfQ');
 const PLATFORM_FEE_WALLET = new PublicKey('FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8');
 
 console.log('Solana configuration loaded:', {
@@ -218,6 +218,69 @@ export async function initializeGlobalGame(wallet, serverAuthority = null) {
   const signedTransaction = await signTransaction(transaction);
   const signature = await connection.sendRawTransaction(signedTransaction.serialize());
   
+  await connection.confirmTransaction({
+    blockhash,
+    lastValidBlockHeight,
+    signature
+  }, 'confirmed');
+  
+  console.log('Global game initialized with server authority:', serverAuthority.toString());
+  
+  return { success: true, signature };
+}
+
+// Dołączanie do globalnej gry
+export async function joinGlobalGame(stakeAmount, wallet) {
+  const { publicKey, signTransaction } = wallet;
+  
+  if (!publicKey) throw new Error('Wallet not connected');
+  
+  // Sprawdź stan gracza przed próbą dołączenia
+  const playerState = await checkPlayerState(wallet);
+  
+  // Gracz może dołączyć jeśli:
+  // 1. Nie ma konta na blockchain (nowy gracz)
+  // 2. Ma konto ale nie jest aktywny (został zjedzony)
+  // 3. Ma konto, jest aktywny ale wartość = 0 (respawn po śmierci)
+  
+  if (playerState?.isActive && playerState.currentValueLamports > 0) {
+    throw new Error('You are already active in the game. Please cash out first.');
+  }
+  
+  const [gamePDA] = await findGlobalGamePDA();
+  const [playerStatePDA] = await findPlayerStatePDA(publicKey);
+  
+  console.log('Joining global game:', {
+    stakeAmount,
+    gamePDA: gamePDA.toString(),
+    playerStatePDA: playerStatePDA.toString(),
+    existingPlayer: playerState?.exists,
+    isActive: playerState?.isActive,
+    currentValue: playerState?.currentValueLamports
+  });
+  
+  const data = serializeJoinGameData(stakeAmount);
+  
+  const instruction = new TransactionInstruction({
+    keys: [
+      { pubkey: publicKey, isSigner: true, isWritable: true },
+      { pubkey: playerStatePDA, isSigner: false, isWritable: true },
+      { pubkey: gamePDA, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey('SysvarRent111111111111111111111111111111111'), isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM_ID,
+    data: data
+  });
+  
+  const transaction = new Transaction().add(instruction);
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+  transaction.recentBlockhash = blockhash;
+  transaction.feePayer = publicKey;
+  
+  const signedTransaction = await signTransaction(transaction);
+  const signature = await connection.sendRawTransaction(signedTransaction.serialize());
+  
   console.log('Transaction sent:', signature);
   
   await connection.confirmTransaction({
@@ -392,67 +455,4 @@ export async function cashOut(wallet) {
 }
 
 // Export connection dla innych komponentów jeśli potrzebują
-export { connection, PROGRAM_ID }; false },
-      { pubkey: new PublicKey('SysvarRent111111111111111111111111111111111'), isSigner: false, isWritable: false },
-    ],
-    programId: PROGRAM_ID,
-    data: data
-  });
-  
-  const transaction = new Transaction().add(instruction);
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-  transaction.recentBlockhash = blockhash;
-  transaction.feePayer = publicKey;
-  
-  const signedTransaction = await signTransaction(transaction);
-  const signature = await connection.sendRawTransaction(signedTransaction.serialize());
-  
-  await connection.confirmTransaction({
-    blockhash,
-    lastValidBlockHeight,
-    signature
-  }, 'confirmed');
-  
-  console.log('Global game initialized with server authority:', serverAuthority.toString());
-  
-  return { success: true, signature };
-}
-
-// Dołączanie do globalnej gry
-export async function joinGlobalGame(stakeAmount, wallet) {
-  const { publicKey, signTransaction } = wallet;
-  
-  if (!publicKey) throw new Error('Wallet not connected');
-  
-  // Sprawdź stan gracza przed próbą dołączenia
-  const playerState = await checkPlayerState(wallet);
-  
-  // Gracz może dołączyć jeśli:
-  // 1. Nie ma konta na blockchain (nowy gracz)
-  // 2. Ma konto ale nie jest aktywny (został zjedzony)
-  // 3. Ma konto, jest aktywny ale wartość = 0 (respawn po śmierci)
-  
-  if (playerState?.isActive && playerState.currentValueLamports > 0) {
-    throw new Error('You are already active in the game. Please cash out first.');
-  }
-  
-  const [gamePDA] = await findGlobalGamePDA();
-  const [playerStatePDA] = await findPlayerStatePDA(publicKey);
-  
-  console.log('Joining global game:', {
-    stakeAmount,
-    gamePDA: gamePDA.toString(),
-    playerStatePDA: playerStatePDA.toString(),
-    existingPlayer: playerState?.exists,
-    isActive: playerState?.isActive,
-    currentValue: playerState?.currentValueLamports
-  });
-  
-  const data = serializeJoinGameData(stakeAmount);
-  
-  const instruction = new TransactionInstruction({
-    keys: [
-      { pubkey: publicKey, isSigner: true, isWritable: true },
-      { pubkey: playerStatePDA, isSigner: false, isWritable: true },
-      { pubkey: gamePDA, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable:
+export { connection, PROGRAM_ID };
