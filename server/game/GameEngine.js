@@ -126,14 +126,15 @@ class GameEngine {
     let player = this.players.get(playerAddress);
     
     if (player) {
-      // Gracz już istnieje
+      // Gracz istnieje - nie powinno się zdarzyć bo usuwamy natychmiast
+      console.log(`WARNING: Player ${playerAddress} still exists in game map!`);
+      
       if (!player.isAlive) {
-        // Gracz był zjedzony - usuń go całkowicie przed nową grą
+        // Martwy gracz - usuń go i kontynuuj
         this.players.delete(playerAddress);
-        console.log(`Player ${playerAddress} was dead - removing for fresh start with stake: ${initialStake}`);
-        // Kontynuuj tworzenie nowego gracza poniżej
+        console.log(`Removed dead player ${playerAddress} before creating new one`);
       } else {
-        // Gracz żyje - zwróć istniejącego gracza
+        // Gracz żyje - zwróć istniejącego
         console.log(`Player ${playerAddress} already in game and alive`);
         return player;
       }
@@ -182,7 +183,7 @@ class GameEngine {
       console.log(`Player ${playerAddress} cashed out with ${player.solValue} lamports from Zone ${player.currentZone}`);
       return player;
     } else {
-      // Zjedzony - oznacz jako nieaktywny
+      // Zjedzony - usuń NATYCHMIAST
       player.isAlive = false;
       player.mass = 0;
       const lostValue = player.solValue;
@@ -190,15 +191,10 @@ class GameEngine {
       this.convertPlayerToFood(player);
       this.totalSolInGame -= lostValue; // SOL został przekazany innemu graczowi
       
-      // Usuń gracza całkowicie po 5 sekundach
-      setTimeout(() => {
-        if (this.players.has(playerAddress) && !this.players.get(playerAddress).isAlive) {
-          this.players.delete(playerAddress);
-          console.log(`Player ${playerAddress} removed after death timeout`);
-        }
-      }, 5000);
+      // USUŃ GRACZA NATYCHMIAST!
+      this.players.delete(playerAddress);
       
-      console.log(`Player ${playerAddress} was eaten and marked as dead, will be removed in 5s`);
+      console.log(`Player ${playerAddress} was eaten and removed from game immediately`);
       return player;
     }
   }

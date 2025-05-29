@@ -467,11 +467,22 @@ io.on('connection', (socket) => {
     if (playerInfo) {
       const { playerAddress } = playerInfo;
       
-      // Nie usuwaj gracza z gry - może wrócić
+      // Sprawdź czy gracz istnieje i żyje
+      const player = globalGame.players.get(playerAddress);
+      if (player && player.isAlive) {
+        // Gracz żyje - zachowaj go w grze
+        console.log(`Player ${playerAddress} disconnected but remains in game`);
+      } else {
+        // Gracz nie istnieje lub nie żyje - wyczyść wszystko
+        console.log(`Cleaning up disconnected player ${playerAddress}`);
+        if (player && !player.isAlive) {
+          globalGame.players.delete(playerAddress);
+        }
+      }
+      
+      // Zawsze usuń mapowania socketów przy disconnect
       playerSockets.delete(playerAddress);
       socketPlayers.delete(socket.id);
-      
-      console.log(`Player ${playerAddress} disconnected but remains in game`);
     }
   });
 });
@@ -491,17 +502,25 @@ function broadcastGameState() {
     const playerView = globalGame.getPlayerView(playerAddress);
     
     if (!playerView) {
-      // Gracz został zjedzony
+      // Gracz nie ma widoku - został zjedzony lub nie istnieje
       const player = globalGame.players.get(playerAddress);
-      if (player && !player.isAlive) {
-        // Gracz istnieje ale nie żyje - wyślij event eliminacji
+      
+      // Jeśli gracza nie ma w ogóle w mapie = został zjedzony i usunięty
+      if (!player) {
+        // Wyślij event eliminacji
         io.to(socketId).emit('player_eliminated', {
           playerAddress,
           reason: 'You were eaten by another player!'
         });
         // Usuń mapowania dla zjedzonego gracza
         playerSockets.delete(playerAddress);
-        socketPlayers.delete(socketId);
+        
+        const socketPlayer = socketPlayers.get(socketId);
+        if (socketPlayer) {
+          socketPlayers.delete(socketId);
+        }
+        
+        console.log(`Removed socket mappings for eaten player ${playerAddress}`);
       }
       continue;
     }
