@@ -19,7 +19,7 @@ const GAME_SERVER_URL = import.meta.env.VITE_GAME_SERVER_URL || 'http://localhos
 console.log('Using game server URL:', GAME_SERVER_URL);
 
 // Program ID - ZAKTUALIZUJ PO DEPLOYU!
-const PROGRAM_ID = new PublicKey('ArRkSgypyvfSDdCxcQ6WdDAHGA1YeRtnmkRXA7ZHMrEb');
+const PROGRAM_ID = new PublicKey('J4CuZ3NrqppFQ8gjrBgxMheNPui4RxF3S1CoeEeKWWqv');
 const PLATFORM_FEE_WALLET = new PublicKey('FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8');
 
 console.log('Solana configuration loaded:', {
@@ -229,7 +229,35 @@ export async function initializeGlobalGame(wallet, serverAuthority = null) {
   return { success: true, signature };
 }
 
-// Dołączanie do globalnej gry
+// NOWA FUNKCJA: Wyczyść stan gracza przez serwer
+export async function requestForceCleanup(playerAddress) {
+  try {
+    console.log('Requesting force cleanup for player:', playerAddress);
+    
+    const response = await fetch(`${GAME_SERVER_URL}/api/game/force-cleanup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playerAddress
+      })
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to force cleanup');
+    }
+    
+    const result = await response.json();
+    console.log('Force cleanup result:', result);
+    
+    return result;
+  } catch (error) {
+    console.error('Error requesting force cleanup:', error);
+    throw error;
+  }
+}
+
+// Dołączanie do globalnej gry - ZAKTUALIZOWANE
 export async function joinGlobalGame(stakeAmount, wallet) {
   const { publicKey, signTransaction } = wallet;
   
@@ -244,7 +272,32 @@ export async function joinGlobalGame(stakeAmount, wallet) {
   // 3. Ma konto, jest aktywny ale wartość = 0 (respawn po śmierci)
   
   if (playerState?.isActive && playerState.currentValueLamports > 0) {
-    throw new Error('You are already active in the game. Please cash out first.');
+    console.log('Player is marked as active on blockchain, requesting cleanup...');
+    
+    // Poproś serwer o wyczyszczenie
+    try {
+      const cleanupResult = await requestForceCleanup(publicKey.toString());
+      
+      if (cleanupResult.success) {
+        console.log('Cleanup successful, waiting for blockchain confirmation...');
+        
+        // Poczekaj chwilę na potwierdzenie blockchain
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Sprawdź ponownie
+        const newPlayerState = await checkPlayerState(wallet);
+        if (newPlayerState?.isActive && newPlayerState.currentValueLamports > 0) {
+          throw new Error('Cleanup failed - player still active. Please try again in a moment.');
+        }
+        
+        console.log('Player cleaned up successfully, proceeding with join...');
+      } else {
+        throw new Error('Server failed to cleanup player state. Please try again.');
+      }
+    } catch (cleanupError) {
+      console.error('Cleanup error:', cleanupError);
+      throw new Error('Failed to cleanup existing player state. Please try again in a moment.');
+    }
   }
   
   const [gamePDA] = await findGlobalGamePDA();

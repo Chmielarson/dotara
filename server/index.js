@@ -43,7 +43,7 @@ const io = new Server(server, {
 // Konfiguracja Solana
 const SOLANA_NETWORK = process.env.SOLANA_NETWORK || 'devnet';
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || clusterApiUrl(SOLANA_NETWORK);
-const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || 'ArRkSgypyvfSDdCxcQ6WdDAHGA1YeRtnmkRXA7ZHMrEb');
+const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || 'J4CuZ3NrqppFQ8gjrBgxMheNPui4RxF3S1CoeEeKWWqv');
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
@@ -153,6 +153,112 @@ async function updatePlayerValueOnChain(eaterAddress, eatenAddress, eatenValue) 
   }
 }
 
+// NOWA FUNKCJA: Force cleanup gracza (bez wypłaty!)
+async function forceCleanupPlayer(playerAddress) {
+  if (!serverWallet) {
+    console.log('No server wallet - cannot force cleanup');
+    return null;
+  }
+  
+  try {
+    console.log('Force cleanup for player:', playerAddress);
+    
+    const playerPubkey = new PublicKey(playerAddress);
+    
+    // Znajdź PDA
+    const [gamePDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('global_game')],
+      PROGRAM_ID
+    );
+    
+    const [playerStatePDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('player_state'), playerPubkey.toBuffer()],
+      PROGRAM_ID
+    );
+    
+    // Platform fee wallet
+    const PLATFORM_FEE_WALLET = new PublicKey('FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8');
+    
+    // Serializuj dane instrukcji - ForceCleanup
+    const instructionData = Buffer.alloc(1 + 32);
+    instructionData.writeUInt8(5, 0); // ForceCleanup instruction (index 5)
+    playerPubkey.toBuffer().copy(instructionData, 1);
+    
+    // Utwórz instrukcję - server wallet jako pierwszy account (authority)
+    const instruction = new TransactionInstruction({
+      keys: [
+        { pubkey: serverWallet.publicKey, isSigner: true, isWritable: true }, // Server authority
+        { pubkey: playerStatePDA, isSigner: false, isWritable: true },
+        { pubkey: gamePDA, isSigner: false, isWritable: true },
+        { pubkey: PLATFORM_FEE_WALLET, isSigner: false, isWritable: false }, // Nie zapisujemy do fee wallet
+        { pubkey: playerPubkey, isSigner: false, isWritable: false }, // Gracz nie otrzymuje środków
+      ],
+      programId: PROGRAM_ID,
+      data: instructionData
+    });
+    
+    // Utwórz i wyślij transakcję
+    const transaction = new Transaction().add(instruction);
+    
+    const signature = await sendAndConfirmTransaction(
+      connection,
+      transaction,
+      [serverWallet], // Server wallet jako signer
+      { commitment: 'confirmed' }
+    );
+    
+    console.log('Player force cleaned up (no payout). Signature:', signature);
+    return signature;
+    
+  } catch (error) {
+    console.error('Error force cleanup player:', error);
+    
+    // Jeśli błąd to że gracz nie jest aktywny, to to jest ok
+    if (error.logs && error.logs.some(log => log.includes('Player is not active'))) {
+      console.log('Player already inactive, no need to cleanup');
+      return 'already_inactive';
+    }
+    
+    return null;
+  }
+}igner zamiast gracza
+    const instruction = new TransactionInstruction({
+      keys: [
+        { pubkey: playerPubkey, isSigner: false, isWritable: true }, // Gracz NIE jest signer
+        { pubkey: playerStatePDA, isSigner: false, isWritable: true },
+        { pubkey: gamePDA, isSigner: false, isWritable: true },
+        { pubkey: PLATFORM_FEE_WALLET, isSigner: false, isWritable: true },
+      ],
+      programId: PROGRAM_ID,
+      data: instructionData
+    });
+    
+    // Utwórz i wyślij transakcję
+    const transaction = new Transaction().add(instruction);
+    
+    const signature = await sendAndConfirmTransaction(
+      connection,
+      transaction,
+      [serverWallet], // Server wallet jako signer
+      { commitment: 'confirmed' }
+    );
+    
+    console.log('Player force cashed out. Signature:', signature);
+    return signature;
+    
+  } catch (error) {
+    console.error('Error force cashing out player:', error);
+    
+    // Jeśli błąd to że gracz nie jest aktywny, to to jest ok
+    if (error.logs && error.logs.some(log => log.includes('InvalidAccountData'))) {
+      console.log('Player already inactive, no need to cash out');
+      return 'already_inactive';
+    }
+    
+    return null;
+  }
+}
+
 // Pojedyncza globalna instancja gry
 const globalGame = new GameEngine();
 
@@ -240,6 +346,66 @@ app.post('/api/game/cashout', async (req, res) => {
   } catch (error) {
     console.error('Error cashing out:', error);
     res.status(500).json({ error: 'Failed to cash out', details: error.message });
+  }
+});
+
+// NOWY ENDPOINT: Force cleanup gracza
+app.post('/api/game/force-cleanup', async (req, res) => {
+  try {
+    const { playerAddress } = req.body;
+    
+    if (!playerAddress) {
+      return res.status(400).json({ error: 'Player address required' });
+    }
+    
+    console.log('Force cleanup requested for player:', playerAddress);
+    
+    // Najpierw usuń gracza z gry jeśli istnieje
+    const player = globalGame.players.get(playerAddress);
+    if (player) {
+      console.log(`Removing player ${playerAddress} from game engine`);
+      globalGame.removePlayer(playerAddress, true); // true = cash out
+    }
+    
+    // Usuń mapowania socketów
+    const socketId = playerSockets.get(playerAddress);
+    if (socketId) {
+      playerSockets.delete(playerAddress);
+      socketPlayers.delete(socketId);
+    }
+    
+    // Jeśli mamy server wallet, spróbuj wyczyścić stan na blockchain
+    if (serverWallet) {
+      console.log('Attempting blockchain cleanup...');
+      const result = await forceCleanupPlayer(playerAddress);
+      
+      if (result) {
+        console.log('Blockchain cleanup successful');
+        res.json({ 
+          success: true, 
+          message: 'Player cleaned up successfully',
+          blockchainCleaned: true,
+          signature: result !== 'already_inactive' ? result : null
+        });
+      } else {
+        console.log('Blockchain cleanup failed, but game state cleaned');
+        res.json({ 
+          success: true, 
+          message: 'Player cleaned from game engine only',
+          blockchainCleaned: false
+        });
+      }
+    } else {
+      console.log('No server wallet - cleaned from game engine only');
+      res.json({ 
+        success: true, 
+        message: 'Player cleaned from game engine only',
+        blockchainCleaned: false
+      });
+    }
+  } catch (error) {
+    console.error('Error in force cleanup:', error);
+    res.status(500).json({ error: 'Failed to cleanup player', details: error.message });
   }
 });
 

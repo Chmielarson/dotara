@@ -134,6 +134,11 @@ pub enum SolanaIoInstruction {
         platform_fee_percent: Option<u8>,
         new_server_authority: Option<Pubkey>,
     },
+    
+    /// Server authority może wymusić czyszczenie stanu gracza (bez wypłaty)
+    ForceCleanup {
+        player: Pubkey,
+    },
 }
 
 /// Przetwarzanie instrukcji programu
@@ -164,6 +169,10 @@ pub fn process_instruction(
         SolanaIoInstruction::UpdateGameParams { min_stake, max_stake, platform_fee_percent, new_server_authority } => {
             msg!("Updating game parameters");
             process_update_game_params(program_id, accounts, min_stake, max_stake, platform_fee_percent, new_server_authority)
+        },
+        SolanaIoInstruction::ForceCleanup { player } => {
+            msg!("Server forcing cleanup for player: {}", player);
+            process_force_cleanup(program_id, accounts, player)
         },
     }
 }
@@ -543,5 +552,97 @@ fn process_update_game_params(
     game.to_account_data(&mut game_account.data.borrow_mut())?;
     
     msg!("Game parameters updated");
+    Ok(())
+}
+
+// NOWA FUNKCJA: Force cleanup przez server authority (bez wypłaty!)
+fn process_force_cleanup(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    player_pubkey: Pubkey,
+) -> ProgramResult {
+    let accounts_iter = &mut accounts.iter();
+    
+    let authority_account = next_account_info(accounts_iter)?;
+    let player_state_account = next_account_info(accounts_iter)?;
+    let game_account = next_account_info(accounts_iter)?;
+    let platform_fee_account = next_account_info(accounts_iter)?;
+    let player_account = next_account_info(accounts_iter)?;
+    
+    const PLATFORM_WALLET: &str = "FEEfBE29dqRgC8qMv6f9YXTSNbX7LMN3Reo3UsYdoUd8";
+    let platform_pubkey = Pubkey::try_from(PLATFORM_WALLET).unwrap();
+    
+    if *platform_fee_account.key != platform_pubkey {
+        return Err(ProgramError::InvalidArgument);
+    }
+    
+    if !authority_account.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    
+    // Załaduj grę i sprawdź authority
+    let mut game = GlobalGame::from_account_data(&game_account.data.borrow())?;
+    
+    if *authority_account.key != game.server_authority {
+        msg!("Unauthorized: Only server authority can force cash out");
+        return Err(ProgramError::InvalidAccountData);
+    }
+    
+    // Sprawdź czy player account jest poprawny
+    if *player_account.key != player_pubkey {
+        return Err(ProgramError::InvalidArgument);
+    }
+    
+    // Sprawdź PDA gracza
+    let (expected_player_state_pubkey, _) = Pubkey::find_program_address(
+        &[b"player_state", player_pubkey.as_ref()],
+        program_id,
+    );
+    
+    if expected_player_state_pubkey != *player_state_account.key {
+        return Err(ProgramError::InvalidArgument);
+    }
+    
+    // Załaduj stan gracza
+    let mut player_state = PlayerState::try_from_slice(&player_state_account.data.borrow())?;
+    
+    // WAŻNE: Force cash out TYLKO czyści stan - NIE wypłaca pieniędzy!
+    // To jest tylko do usuwania "ghost" graczy z blockchain
+    
+    if !player_state.is_active {
+        msg!("Player is not active, no need to force cleanup");
+        return Ok(());
+    }
+    
+    // Loguj ile gracz miał wartości (dla debugowania)
+    msg!("Force cleanup: Player {} had {} lamports", 
+         player_pubkey, player_state.current_value);
+    
+    // WAŻNE: NIE wypłacamy graczowi żadnych środków!
+    // Jeśli gracz miał wartość > 0, to znaczy że:
+    // 1. Został zjedzony (wartość przeszła do innego gracza)
+    // 2. Lub jest to błąd synchronizacji
+    
+    // Tylko aktualizujemy stan gracza jako nieaktywny
+    let clock = Clock::get()?;
+    player_state.is_active = false;
+    player_state.last_cashout = clock.unix_timestamp;
+    // NIE dodajemy do total_earned bo to nie jest prawdziwy cash out
+    // Ustawiamy current_value na 0 bez wypłaty
+    let lost_value = player_state.current_value;
+    player_state.current_value = 0;
+    
+    player_state.serialize(&mut &mut player_state_account.data.borrow_mut()[..])?;
+    
+    // Aktualizuj grę - zmniejsz liczbę aktywnych graczy
+    game.active_players = game.active_players.saturating_sub(1);
+    
+    // WAŻNE: NIE odejmujemy z total_pool bo te środki już zostały przeniesione
+    // (gracz został zjedzony lub cash out był już wykonany)
+    
+    game.to_account_data(&mut game_account.data.borrow_mut())?;
+    
+    msg!("Server forced cleanup for ghost player {} (lost {} lamports)", 
+         player_pubkey, lost_value);
     Ok(())
 }
