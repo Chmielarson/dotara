@@ -1,26 +1,44 @@
 // src/components/Canvas.js
-import React, { useRef, useEffect, forwardRef } from 'react';
+import React, { useRef, useEffect, forwardRef, useMemo } from 'react';
+import { InterpolationManager } from './InterpolationManager';
 
 const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
   const animationRef = useRef();
   const gridPatternRef = useRef();
+  const lastFrameTime = useRef(Date.now());
+  const frameCount = useRef(0);
+  const fps = useRef(0);
+  
+  // Interpolation manager dla płynnego ruchu
+  const interpolationManager = useMemo(() => new InterpolationManager(100), []);
   
   useEffect(() => {
     if (!ref.current) return;
     
     const canvas = ref.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', {
+      alpha: false, // Nie potrzebujemy przezroczystości
+      desynchronized: true // Lepsze performance
+    });
+    
+    // Włącz image smoothing dla lepszej jakości
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     
     // Ustaw rozmiar canvas
     const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      const pixelRatio = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * pixelRatio;
+      canvas.height = window.innerHeight * pixelRatio;
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
+      ctx.scale(pixelRatio, pixelRatio);
     };
     
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
     
-    // Stwórz wzór siatki
+    // Stwórz wzór siatki (cache)
     const createGridPattern = () => {
       const patternCanvas = document.createElement('canvas');
       const patternCtx = patternCanvas.getContext('2d');
@@ -50,8 +68,18 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
     
     gridPatternRef.current = createGridPattern();
     
-    // Funkcja do przyciemniania koloru
+    // Cache dla kolorów
+    const colorCache = new Map();
+    
+    // Funkcja do przyciemniania koloru (cache)
     const darkenColor = (color, percent) => {
+      const cacheKey = `${color}-${percent}`;
+      if (colorCache.has(cacheKey)) {
+        return colorCache.get(cacheKey);
+      }
+      
+      let result = color;
+      
       // Jeśli kolor jest w formacie hsl
       if (color.startsWith('hsl')) {
         const match = color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
@@ -59,16 +87,28 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
           const h = parseInt(match[1]);
           const s = parseInt(match[2]);
           const l = Math.max(0, parseInt(match[3]) - percent);
-          return `hsl(${h}, ${s}%, ${l}%)`;
+          result = `hsl(${h}, ${s}%, ${l}%)`;
         }
       }
-      // Fallback
-      return color;
+      
+      colorCache.set(cacheKey, result);
+      return result;
     };
     
-    // Funkcja renderowania
+    // Optymalizowana funkcja renderowania
     const render = (timestamp) => {
-      // Białe tło
+      // FPS counter
+      frameCount.current++;
+      const currentTime = Date.now();
+      const timeDelta = currentTime - lastFrameTime.current;
+      
+      if (timeDelta >= 1000) {
+        fps.current = Math.round((frameCount.current * 1000) / timeDelta);
+        frameCount.current = 0;
+        lastFrameTime.current = currentTime;
+      }
+      
+      // Clear canvas
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
@@ -79,7 +119,17 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       
       const { player, players, food, gameState } = playerView;
       
-      // Dynamiczny zoom bazowany na rozmiarze gracza i okna
+      // Aktualizuj interpolation manager
+      if (players) {
+        for (const p of players) {
+          interpolationManager.updateEntity(p.id, p);
+        }
+      }
+      
+      // Pobierz interpolowane pozycje
+      const interpolatedPlayers = interpolationManager.getAllInterpolatedStates();
+      
+      // Dynamiczny zoom
       const screenSize = Math.min(canvas.width, canvas.height);
       const baseZoom = screenSize / 800;
       const playerZoom = Math.max(0.8, Math.min(1.5, 100 / (player.radius * 0.3 + 50)));
@@ -92,18 +142,18 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       // Zapisz stan kontekstu
       ctx.save();
       
-      // Zastosuj zoom
+      // Zastosuj zoom i translację
       ctx.scale(zoomLevel, zoomLevel);
-      
-      // Przesuń canvas względem gracza
       ctx.translate(-cameraX, -cameraY);
       
-      // Rysuj tło z siatką
+      // Rysuj tło z siatką (używaj cached pattern)
       if (gridPatternRef.current) {
         ctx.fillStyle = gridPatternRef.current;
+        const gridStartX = Math.floor(cameraX / 50) * 50;
+        const gridStartY = Math.floor(cameraY / 50) * 50;
         ctx.fillRect(
-          Math.floor(cameraX / 50) * 50,
-          Math.floor(cameraY / 50) * 50,
+          gridStartX,
+          gridStartY,
           (canvas.width / zoomLevel) + 100,
           (canvas.height / zoomLevel) + 100
         );
@@ -116,7 +166,7 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
         ctx.strokeRect(0, 0, gameState.mapSize, gameState.mapSize);
       }
       
-      // Rysuj bariery stref
+      // Rysuj bariery stref (jeśli są)
       if (playerView.barriers) {
         playerView.barriers.forEach(barrier => {
           ctx.strokeStyle = barrier.canPass ? 'rgba(0, 255, 0, 0.3)' : 'rgba(255, 0, 0, 0.5)';
@@ -133,68 +183,57 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
           }
           ctx.stroke();
           ctx.setLineDash([]);
-          
-          // Rysuj tekst informacyjny o barierze
-          if (!barrier.canPass) {
-            ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
-            ctx.font = '20px Arial';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            
-            const centerX = barrier.type === 'horizontal' ? barrier.x + barrier.width / 2 : barrier.x;
-            const centerY = barrier.type === 'vertical' ? barrier.y + barrier.height / 2 : barrier.y;
-            
-            ctx.fillText('Zone Locked - Need more SOL!', centerX, centerY);
-          }
         });
       }
       
-      // Rysuj jedzenie
+      // Batch render jedzenia
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+      ctx.shadowBlur = 5;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
+      
       food.forEach(f => {
-        // Cień
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
-        ctx.shadowBlur = 5;
-        ctx.shadowOffsetX = 2;
-        ctx.shadowOffsetY = 2;
-        
         ctx.fillStyle = f.color;
         ctx.beginPath();
         ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
         ctx.fill();
-        
-        // Reset cienia
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
       });
       
-      // Rysuj graczy - sortuj według rozmiaru (mniejsze najpierw, większe na wierzchu)
-      const sortedPlayers = [...players].sort((a, b) => a.radius - b.radius);
+      // Reset shadow
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
       
+      // Sortuj graczy według rozmiaru
+      const sortedPlayers = Array.from(interpolatedPlayers.values())
+        .sort((a, b) => a.radius - b.radius);
+      
+      // Batch render graczy
       sortedPlayers.forEach(p => {
         // Sprawdź czy gracz jest w niebezpieczeństwie
         let inDanger = false;
         if (p.isMe && player.isAlive) {
-          players.forEach(other => {
+          for (const other of interpolatedPlayers.values()) {
             if (other.id !== p.id && other.radius > p.radius * 1.1) {
               const dx = other.x - p.x;
               const dy = other.y - p.y;
               const distance = Math.sqrt(dx * dx + dy * dy);
               if (distance < other.radius + p.radius) {
                 inDanger = true;
+                break;
               }
             }
-          });
+          }
         }
         
-        // Cień gracza
+        // Shadow
         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
         ctx.shadowBlur = 10;
         ctx.shadowOffsetX = 3;
         ctx.shadowOffsetY = 3;
         
-        // Ciało gracza
+        // Body
         ctx.fillStyle = p.color;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
@@ -211,39 +250,36 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
           ctx.setLineDash([]);
         }
         
-        // Obramowanie
+        // Border
         const borderColor = darkenColor(p.color, 20);
+        ctx.strokeStyle = inDanger ? '#FF0000' : borderColor;
+        ctx.lineWidth = p.isMe ? 3 : 2;
         if (inDanger) {
-          ctx.strokeStyle = '#FF0000';
-          ctx.lineWidth = 5;
           ctx.setLineDash([10, 5]);
-        } else {
-          ctx.strokeStyle = borderColor;
-          ctx.lineWidth = p.isMe ? 3 : 2;
-          ctx.setLineDash([]);
         }
         ctx.stroke();
+        ctx.setLineDash([]);
         
-        // Reset cienia
+        // Reset shadow
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
         
-        // Nazwa gracza
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = `${Math.max(12, p.radius / 4)}px Arial`;
+        // Text (nickname + SOL)
+        const fontSize = Math.max(12, p.radius / 4);
+        ctx.font = `${fontSize}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#FFFFFF';
         ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.lineWidth = 3;
+        
+        // Nickname
         ctx.strokeText(p.nickname || 'Player', p.x, p.y - p.radius / 6);
         ctx.fillText(p.nickname || 'Player', p.x, p.y - p.radius / 6);
         
-        // Wartość SOL gracza
+        // SOL value
         if (p.solDisplay) {
           ctx.font = `${Math.max(10, p.radius / 6)}px Arial`;
-          ctx.fillStyle = '#FFFFFF';
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-          ctx.lineWidth = 2;
           const solText = `${p.solDisplay} SOL`;
           ctx.strokeText(solText, p.x, p.y + p.radius / 3);
           ctx.fillText(solText, p.x, p.y + p.radius / 3);
@@ -253,8 +289,9 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       // Przywróć stan kontekstu
       ctx.restore();
       
-      // Rysuj miniaturkę mapy
+      // Rysuj UI (minimap, FPS)
       drawMinimap(ctx, canvas, player, gameState, sortedPlayers);
+      drawFPS(ctx, fps.current);
       
       animationRef.current = requestAnimationFrame(render);
     };
@@ -272,27 +309,24 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
       ctx.fillRect(minimapX, minimapY, minimapSize, minimapSize);
       
-      // Rysuj strefy na minimapie
+      // Rysuj strefy
       if (playerView?.zones) {
-        const zoneSize = minimapSize / 2; // 2x2 grid
+        const zoneSize = minimapSize / 2;
         
-        // Zone 1 - Bronze (top-left)
+        // Zone colors
         ctx.fillStyle = 'rgba(205, 127, 50, 0.2)';
         ctx.fillRect(minimapX, minimapY, zoneSize, zoneSize);
         
-        // Zone 2 - Silver (top-right)
         ctx.fillStyle = 'rgba(192, 192, 192, 0.2)';
         ctx.fillRect(minimapX + zoneSize, minimapY, zoneSize, zoneSize);
         
-        // Zone 3 - Gold (bottom-left)
         ctx.fillStyle = 'rgba(255, 215, 0, 0.2)';
         ctx.fillRect(minimapX, minimapY + zoneSize, zoneSize, zoneSize);
         
-        // Zone 4 - Diamond (bottom-right)
         ctx.fillStyle = 'rgba(185, 242, 255, 0.2)';
         ctx.fillRect(minimapX + zoneSize, minimapY + zoneSize, zoneSize, zoneSize);
         
-        // Linie graniczne stref
+        // Zone borders
         ctx.strokeStyle = '#666666';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -303,54 +337,51 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
         ctx.stroke();
       }
       
-      // Obramowanie
+      // Border
       ctx.strokeStyle = '#000000';
       ctx.lineWidth = 2;
       ctx.strokeRect(minimapX, minimapY, minimapSize, minimapSize);
       
-      // Skala
+      // Scale
       const scale = minimapSize / gameState.mapSize;
       
-      // Rysuj wszystkich graczy na minimapie
+      // Draw players on minimap
       players.forEach(p => {
-        // Upewnij się, że pozycja jest w granicach mapy
-        const clampedX = Math.max(0, Math.min(gameState.mapSize, p.x));
-        const clampedY = Math.max(0, Math.min(gameState.mapSize, p.y));
-        
-        const playerMinimapX = minimapX + clampedX * scale;
-        const playerMinimapY = minimapY + clampedY * scale;
+        const playerMinimapX = minimapX + p.x * scale;
+        const playerMinimapY = minimapY + p.y * scale;
         const playerMinimapRadius = Math.max(2, p.radius * scale);
         
-        // Upewnij się, że gracz jest rysowany w granicach minimapy
-        if (playerMinimapX >= minimapX && playerMinimapX <= minimapX + minimapSize &&
-            playerMinimapY >= minimapY && playerMinimapY <= minimapY + minimapSize) {
-          ctx.fillStyle = p.isMe ? '#FFD700' : p.color;
-          ctx.beginPath();
-          ctx.arc(playerMinimapX, playerMinimapY, playerMinimapRadius, 0, Math.PI * 2);
-          ctx.fill();
-          
-          // Dodaj obramowanie dla własnego gracza
-          if (p.isMe) {
-            ctx.strokeStyle = '#000000';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-          }
+        ctx.fillStyle = p.isMe ? '#FFD700' : p.color;
+        ctx.beginPath();
+        ctx.arc(playerMinimapX, playerMinimapY, playerMinimapRadius, 0, Math.PI * 2);
+        ctx.fill();
+        
+        if (p.isMe) {
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1;
+          ctx.stroke();
         }
       });
       
-      // Obszar widoczny
+      // Viewport rect
       const viewSize = 1000 * scale;
       const viewX = minimapX + player.x * scale - viewSize / 2;
       const viewY = minimapY + player.y * scale - viewSize / 2;
       
-      // Ogranicz obszar widoczny do granic minimapy
-      const clampedViewX = Math.max(minimapX, Math.min(minimapX + minimapSize - viewSize, viewX));
-      const clampedViewY = Math.max(minimapY, Math.min(minimapY + minimapSize - viewSize, viewY));
-      const clampedViewSize = Math.min(viewSize, minimapSize);
-      
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
       ctx.lineWidth = 1;
-      ctx.strokeRect(clampedViewX, clampedViewY, clampedViewSize, clampedViewSize);
+      ctx.strokeRect(viewX, viewY, viewSize, viewSize);
+    };
+    
+    // Funkcja rysowania FPS
+    const drawFPS = (ctx, currentFPS) => {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(10, 10, 80, 30);
+      
+      ctx.fillStyle = currentFPS >= 50 ? '#00FF00' : currentFPS >= 30 ? '#FFFF00' : '#FF0000';
+      ctx.font = '16px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText(`FPS: ${currentFPS}`, 20, 30);
     };
     
     // Rozpocznij renderowanie
@@ -361,8 +392,9 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
+      interpolationManager.clear();
     };
-  }, [playerView, ref]);
+  }, [playerView, ref, interpolationManager]);
   
   return (
     <canvas
@@ -370,6 +402,10 @@ const Canvas = forwardRef(({ playerView, onMouseMove }, ref) => {
       className="game-canvas"
       onMouseMove={onMouseMove}
       onContextMenu={(e) => e.preventDefault()}
+      style={{
+        cursor: 'crosshair',
+        touchAction: 'none' // Disable touch scrolling
+      }}
     />
   );
 });

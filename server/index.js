@@ -15,7 +15,9 @@ const {
 } = require('@solana/web3.js');
 const fs = require('fs');
 const bs58 = require('bs58');
-const GameEngine = require('./game/GameEngine');
+const RoomManager = require('./game/RoomManager');
+const DeltaCompressor = require('./networking/DeltaCompressor');
+const BinaryProtocol = require('./networking/BinaryProtocol');
 
 dotenv.config();
 
@@ -37,7 +39,12 @@ const io = new Server(server, {
     credentials: true
   },
   transports: ['websocket', 'polling'],
-  allowEIO3: true
+  allowEIO3: true,
+  // Optymalizacje Socket.IO
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  upgradeTimeout: 30000,
+  maxHttpBufferSize: 1e6, // 1MB
 });
 
 // Konfiguracja Solana
@@ -223,11 +230,11 @@ async function forceCleanupPlayer(playerAddress) {
   }
 }
 
-// Pojedyncza globalna instancja gry
-const globalGame = new GameEngine();
+// Inicjalizuj Room Manager
+const roomManager = new RoomManager();
 
-// Ustaw callback dla aktualizacji blockchain - TERAZ BĘDZIE DZIAŁAĆ!
-globalGame.onPlayerEaten = async (eaterAddress, eatenAddress, eatenValue) => {
+// Ustaw callback dla aktualizacji blockchain
+roomManager.onPlayerEaten = async (eaterAddress, eatenAddress, eatenValue) => {
   console.log('Player eaten callback triggered - updating blockchain');
   const signature = await updatePlayerValueOnChain(eaterAddress, eatenAddress, eatenValue);
   if (signature) {
@@ -237,18 +244,22 @@ globalGame.onPlayerEaten = async (eaterAddress, eatenAddress, eatenValue) => {
   }
 };
 
-globalGame.start();
+// Uruchom cleanup timer
+roomManager.startCleanupTimer();
 
-console.log('Global game started with zone system:', {
-  isRunning: globalGame.isRunning,
-  mapSize: globalGame.mapSize,
-  zones: globalGame.zones.length,
+console.log('Multi-room game server initialized:', {
+  totalRooms: roomManager.maxRooms,
+  maxPlayersPerRoom: roomManager.maxPlayersPerRoom,
+  totalCapacity: roomManager.maxRooms * roomManager.maxPlayersPerRoom,
   serverWalletConfigured: !!serverWallet
 });
 
 // Przechowywanie połączeń graczy
 const playerSockets = new Map(); // playerAddress -> socketId
-const socketPlayers = new Map(); // socketId -> { playerAddress, nickname }
+const socketPlayers = new Map(); // socketId -> { playerAddress, nickname, roomId }
+
+// Delta compressors per player
+const deltaCompressors = new Map(); // playerAddress -> DeltaCompressor
 
 // Globalny chat
 const chatMessages = [];
@@ -258,12 +269,28 @@ const MAX_CHAT_MESSAGES = 100;
 
 // Status gry
 app.get('/api/game/status', (req, res) => {
-  const gameState = globalGame.getGameState();
+  const gameStats = roomManager.getGlobalStats();
   res.json({
     status: 'active',
-    ...gameState,
+    ...gameStats,
     serverWalletConfigured: !!serverWallet,
     serverWalletAddress: serverWallet ? serverWallet.publicKey.toString() : null
+  });
+});
+
+// Status konkretnego pokoju
+app.get('/api/game/room/:roomId/status', (req, res) => {
+  const roomId = parseInt(req.params.roomId);
+  const room = roomManager.rooms.get(roomId);
+  
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  
+  const gameState = room.engine.getGameState();
+  res.json({
+    roomId,
+    ...gameState
   });
 });
 
@@ -298,10 +325,19 @@ app.post('/api/game/cashout', async (req, res) => {
     
     console.log('Player cashing out:', playerAddress);
     
-    const cashOutResult = globalGame.handleCashOut(playerAddress);
+    // Znajdź pokój gracza
+    const room = roomManager.getPlayerRoom(playerAddress);
+    if (!room) {
+      return res.status(404).json({ error: 'Player not found in any room' });
+    }
+    
+    const cashOutResult = room.engine.handleCashOut(playerAddress);
     if (!cashOutResult) {
       return res.status(404).json({ error: 'Player not found' });
     }
+    
+    // Usuń gracza z room managera
+    roomManager.removePlayerFromRoom(playerAddress, true);
     
     res.json({
       success: true,
@@ -324,18 +360,15 @@ app.post('/api/game/force-cleanup', async (req, res) => {
     
     console.log('Force cleanup requested for player:', playerAddress);
     
-    // Najpierw usuń gracza z gry jeśli istnieje
-    const player = globalGame.players.get(playerAddress);
-    if (player) {
-      console.log(`Removing player ${playerAddress} from game engine`);
-      globalGame.removePlayer(playerAddress, true); // true = cash out
-    }
+    // Usuń gracza ze wszystkich pokoi
+    roomManager.removePlayerFromRoom(playerAddress, true);
     
     // Usuń mapowania socketów
     const socketId = playerSockets.get(playerAddress);
     if (socketId) {
       playerSockets.delete(playerAddress);
       socketPlayers.delete(socketId);
+      deltaCompressors.delete(playerAddress);
     }
     
     // Jeśli mamy server wallet, spróbuj wyczyścić stan na blockchain
@@ -374,56 +407,23 @@ app.post('/api/game/force-cleanup', async (req, res) => {
 });
 
 // Admin endpoints (zabezpiecz je w produkcji!)
-app.post('/api/admin/force-remove-player', async (req, res) => {
-  try {
-    const { playerAddress } = req.body;
-    
-    console.log('Admin: Force removing player:', playerAddress);
-    
-    // Usuń z gry
-    const player = globalGame.players.get(playerAddress);
-    if (player) {
-      globalGame.players.delete(playerAddress);
-      globalGame.totalSolInGame -= player.solValue;
-      console.log(`Player ${playerAddress} force removed. Had ${player.solValue} lamports`);
-    }
-    
-    // Usuń mapowania socketów
-    const socketId = playerSockets.get(playerAddress);
-    if (socketId) {
-      playerSockets.delete(playerAddress);
-      socketPlayers.delete(socketId);
-    }
-    
-    res.json({ 
-      success: true, 
-      message: `Player ${playerAddress} removed from game`,
-      removedSol: player ? player.solValue : 0
+app.get('/api/admin/rooms', (req, res) => {
+  const rooms = [];
+  for (const [roomId, room] of roomManager.rooms) {
+    const stats = room.engine.getGameState();
+    rooms.push({
+      id: roomId,
+      players: room.players.size,
+      activePlayers: stats.playerCount,
+      totalSol: stats.totalSolDisplay,
+      performance: stats.performance,
+      lastActivity: room.lastActivity
     });
-  } catch (error) {
-    console.error('Error force removing player:', error);
-    res.status(500).json({ error: error.message });
   }
-});
-
-app.get('/api/admin/active-players', (req, res) => {
-  const players = Array.from(globalGame.players.values()).map(p => ({
-    address: p.address,
-    nickname: p.nickname,
-    solValue: p.solValue,
-    solDisplay: (p.solValue / 1000000000).toFixed(4),
-    isAlive: p.isAlive,
-    mass: Math.floor(p.mass),
-    position: `${Math.floor(p.x)}, ${Math.floor(p.y)}`,
-    currentZone: p.currentZone,
-    zoneName: globalGame.zones[p.currentZone - 1].name
-  }));
   
   res.json({
-    totalPlayers: players.length,
-    totalSolInGame: (globalGame.totalSolInGame / 1000000000).toFixed(4),
-    players,
-    serverWallet: serverWallet ? serverWallet.publicKey.toString() : 'not configured'
+    rooms,
+    globalStats: roomManager.getGlobalStats()
   });
 });
 
@@ -432,8 +432,8 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    gameActive: globalGame.isRunning,
-    activePlayers: globalGame.players.size,
+    rooms: roomManager.rooms.size,
+    totalPlayers: playerSockets.size,
     serverWallet: serverWallet ? serverWallet.publicKey.toString() : 'not configured'
   });
 });
@@ -476,27 +476,16 @@ io.on('connection', (socket) => {
   socket.on('join_game', ({ playerAddress, nickname, initialStake }) => {
     console.log('Join game request:', { playerAddress, nickname, initialStake });
     
-    // Sprawdź czy gracz już istnieje w grze
-    const existingPlayer = globalGame.players.get(playerAddress);
+    // Sprawdź czy gracz już jest w jakimś pokoju
+    const existingRoom = roomManager.getPlayerRoom(playerAddress);
     
-    if (existingPlayer) {
-      // Gracz już istnieje - sprawdź jego stan
-      if (!existingPlayer.isAlive) {
-        // Gracz nie żyje - usuń go całkowicie przed nową grą
-        globalGame.players.delete(playerAddress);
-        console.log(`Removing dead player ${playerAddress} before new game`);
-        
-        // Usuń stare mapowania jeśli istnieją
-        const oldSocketId = playerSockets.get(playerAddress);
-        if (oldSocketId) {
-          playerSockets.delete(playerAddress);
-          socketPlayers.delete(oldSocketId);
-        }
-      } else {
-        // Gracz żyje
+    if (existingRoom) {
+      const player = existingRoom.engine.players.get(playerAddress);
+      
+      if (player && player.isAlive) {
         if (initialStake > 0) {
           // Próbuje dołączyć z nową stawką mimo że żyje
-          console.log(`Player ${playerAddress} is already alive in game`);
+          console.log(`Player ${playerAddress} is already alive in room ${existingRoom.id}`);
           socket.emit('error', {
             message: 'You are already active in the game. Please cash out first.'
           });
@@ -504,70 +493,81 @@ io.on('connection', (socket) => {
         } else {
           // Reconnect do istniejącej sesji
           playerSockets.set(playerAddress, socket.id);
-          socketPlayers.set(socket.id, { playerAddress, nickname });
+          socketPlayers.set(socket.id, { 
+            playerAddress, 
+            nickname,
+            roomId: existingRoom.id 
+          });
+          socket.join(`room-${existingRoom.id}`);
           socket.join('game');
           
-          console.log(`Player ${playerAddress} reconnected to existing game session`);
+          // Inicjalizuj delta compressor dla tego gracza
+          if (!deltaCompressors.has(playerAddress)) {
+            deltaCompressors.set(playerAddress, new DeltaCompressor());
+          }
+          
+          console.log(`Player ${playerAddress} reconnected to room ${existingRoom.id}`);
           
           socket.emit('joined_game', {
             success: true,
-            player: existingPlayer.toJSON()
+            roomId: existingRoom.id,
+            player: player.toJSON()
           });
           return;
         }
       }
     }
     
-    // Nowy gracz lub martwy gracz z nową stawką
-    if (initialStake === 0 && !existingPlayer) {
-      // Całkiem nowy gracz musi mieć stawkę
-      console.log(`New player ${playerAddress} trying to join without stake`);
+    // Przydziel gracza do pokoju
+    const room = roomManager.assignPlayerToRoom(playerAddress, nickname, initialStake);
+    
+    if (!room) {
       socket.emit('error', {
-        message: 'You must provide a stake to join the game.'
+        message: 'All game rooms are full. Please try again later.'
       });
       return;
     }
     
+    // Zapisz mapowania
     playerSockets.set(playerAddress, socket.id);
-    socketPlayers.set(socket.id, { playerAddress, nickname });
+    socketPlayers.set(socket.id, { 
+      playerAddress, 
+      nickname,
+      roomId: room.id 
+    });
+    
+    // Dołącz do pokoju socket.io
+    socket.join(`room-${room.id}`);
     socket.join('game');
     
-    const player = globalGame.addPlayer(playerAddress, nickname, initialStake);
+    // Inicjalizuj delta compressor dla tego gracza
+    deltaCompressors.set(playerAddress, new DeltaCompressor());
     
-    if (!player) {
-      socket.emit('error', {
-        message: 'Failed to join game. Please try again.'
-      });
-      return;
-    }
+    const player = room.engine.players.get(playerAddress);
     
-    console.log(`Player ${playerAddress} (${nickname}) joined game with stake: ${initialStake}`);
+    console.log(`Player ${playerAddress} (${nickname}) joined room ${room.id}`);
     
     socket.emit('joined_game', {
       success: true,
-      player: player.toJSON()
+      roomId: room.id,
+      player: player ? player.toJSON() : null
     });
-  });
-  
-  socket.on('respawn', ({ playerAddress }) => {
-    const player = globalGame.players.get(playerAddress);
-    if (!player || player.isAlive) return;
-    
-    // Respawn gracza
-    globalGame.addPlayer(playerAddress, player.nickname, 0); // Respawn bez dodatkowej stawki
-    
-    console.log(`Player ${playerAddress} respawned`);
   });
   
   socket.on('player_input', (data) => {
     const { playerAddress, input } = data;
-    globalGame.updatePlayer(playerAddress, input);
+    const engine = roomManager.getPlayerEngine(playerAddress);
+    if (engine) {
+      engine.updatePlayer(playerAddress, input);
+    }
   });
   
   socket.on('initiate_cash_out', ({ playerAddress }) => {
     console.log('Player initiating cash out:', playerAddress);
     
-    const player = globalGame.players.get(playerAddress);
+    const engine = roomManager.getPlayerEngine(playerAddress);
+    const player = engine ? engine.players.get(playerAddress) : null;
+    
     if (!player || !player.isAlive) {
       socket.emit('cash_out_initiated', {
         success: false,
@@ -589,12 +589,13 @@ io.on('connection', (socket) => {
     console.log(`- Players eaten: ${player.playersEaten}`);
     console.log(`- Total earned: ${player.totalSolEarned} lamports`);
     
-    // Usuń gracza z gry (ale zachowaj wartość)
-    const removedPlayer = globalGame.removePlayer(playerAddress, true);
+    // Usuń gracza z gry
+    roomManager.removePlayerFromRoom(playerAddress, true);
     
     // Usuń mapowania socketów
     playerSockets.delete(playerAddress);
     socketPlayers.delete(socket.id);
+    deltaCompressors.delete(playerAddress);
     
     socket.emit('cash_out_initiated', {
       success: true,
@@ -629,7 +630,9 @@ io.on('connection', (socket) => {
       const { playerAddress } = playerInfo;
       
       // Sprawdź czy gracz istnieje i żyje
-      const player = globalGame.players.get(playerAddress);
+      const engine = roomManager.getPlayerEngine(playerAddress);
+      const player = engine ? engine.players.get(playerAddress) : null;
+      
       if (player && player.isAlive) {
         // Gracz żyje - zachowaj go w grze
         console.log(`Player ${playerAddress} disconnected but remains in game`);
@@ -637,76 +640,83 @@ io.on('connection', (socket) => {
         // Gracz nie istnieje lub nie żyje - wyczyść wszystko
         console.log(`Cleaning up disconnected player ${playerAddress}`);
         if (player && !player.isAlive) {
-          globalGame.players.delete(playerAddress);
+          roomManager.removePlayerFromRoom(playerAddress, false);
         }
       }
       
       // Zawsze usuń mapowania socketów przy disconnect
       playerSockets.delete(playerAddress);
       socketPlayers.delete(socket.id);
+      deltaCompressors.delete(playerAddress);
     }
   });
 });
 
-// Funkcja broadcastująca stan gry
+// Funkcja broadcastująca stan gry - OPTYMALIZOWANA
 function broadcastGameState() {
-  const gameState = globalGame.getGameState();
+  const globalState = roomManager.getGlobalStats();
   
-  // Wyślij globalny stan do wszystkich
-  io.to('game').emit('game_state', gameState);
+  // Wyślij globalny stan do wszystkich w lobby
+  io.to('lobby').emit('global_stats', globalState);
   
-  // Wyślij spersonalizowany widok każdemu graczowi
-  let broadcastCount = 0;
-  let offlinePlayersEaten = [];
-  
-  for (const [playerAddress, socketId] of playerSockets) {
-    const playerView = globalGame.getPlayerView(playerAddress);
+  // Broadcast per room
+  for (const [roomId, room] of roomManager.rooms) {
+    const gameState = room.engine.getGameState();
     
-    if (!playerView) {
-      // Gracz nie ma widoku - został zjedzony lub nie istnieje
-      const player = globalGame.players.get(playerAddress);
+    // Wyślij stan pokoju do wszystkich w tym pokoju
+    io.to(`room-${roomId}`).emit('room_state', gameState);
+    
+    // Wyślij spersonalizowany widok każdemu graczowi w pokoju
+    for (const playerAddress of room.players) {
+      const socketId = playerSockets.get(playerAddress);
+      if (!socketId) continue;
       
-      // Jeśli gracza nie ma w ogóle w mapie = został zjedzony i usunięty
-      if (!player) {
-        // Wyślij event eliminacji
-        io.to(socketId).emit('player_eliminated', {
-          playerAddress,
-          reason: 'You were eaten by another player!'
-        });
-        // Usuń mapowania dla zjedzonego gracza
-        playerSockets.delete(playerAddress);
+      const playerView = room.engine.getPlayerView(playerAddress);
+      
+      if (!playerView) {
+        // Gracz nie ma widoku - został zjedzony lub nie istnieje
+        const player = room.engine.players.get(playerAddress);
         
-        const socketPlayer = socketPlayers.get(socketId);
-        if (socketPlayer) {
-          socketPlayers.delete(socketId);
+        if (!player) {
+          // Wyślij event eliminacji
+          io.to(socketId).emit('player_eliminated', {
+            playerAddress,
+            reason: 'You were eaten by another player!'
+          });
+          
+          // Usuń mapowania
+          roomManager.removePlayerFromRoom(playerAddress, false);
+          playerSockets.delete(playerAddress);
+          const socketPlayer = socketPlayers.get(socketId);
+          if (socketPlayer) {
+            socketPlayers.delete(socketId);
+          }
+          deltaCompressors.delete(playerAddress);
+          
+          console.log(`Removed socket mappings for eaten player ${playerAddress}`);
         }
-        
-        console.log(`Removed socket mappings for eaten player ${playerAddress}`);
+        continue;
       }
-      continue;
-    }
-    
-    io.to(socketId).emit('player_view', playerView);
-    broadcastCount++;
-  }
-  
-  // Sprawdź graczy którzy nie mają aktywnego połączenia ale są w grze
-  for (const [playerAddress, player] of globalGame.players) {
-    if (!player.isAlive && !playerSockets.has(playerAddress)) {
-      // Gracz był offline gdy został zjedzony
-      offlinePlayersEaten.push(playerAddress);
+      
+      // Użyj delta compression jeśli możliwe
+      const deltaCompressor = deltaCompressors.get(playerAddress);
+      if (deltaCompressor && process.env.USE_DELTA_COMPRESSION === 'true') {
+        const delta = deltaCompressor.computeDelta(playerAddress, playerView);
+        io.to(socketId).emit('player_delta', delta);
+      } else {
+        io.to(socketId).emit('player_view', playerView);
+      }
     }
   }
   
   // Log co 5 sekund
   if (Date.now() % 5000 < 16) {
-    console.log(`Broadcasting to ${broadcastCount} players, game state:`, {
-      activePlayers: gameState.playerCount,
-      totalPlayers: playerSockets.size,
-      foodCount: gameState.foodCount,
-      zoneStats: gameState.zoneStats,
-      offlinePlayersEaten: offlinePlayersEaten.length,
-      blockchainUpdatesEnabled: !!serverWallet
+    console.log('Broadcasting game state:', {
+      totalRooms: roomManager.rooms.size,
+      totalPlayers: globalState.totalPlayers,
+      totalActivePlayers: globalState.totalActivePlayers,
+      totalSol: globalState.totalSolDisplay,
+      capacityUsed: globalState.capacityUsed + '%'
     });
   }
 }
@@ -716,24 +726,36 @@ setInterval(broadcastGameState, 16);
 
 // Statystyki gry co minutę
 setInterval(() => {
-  const stats = globalGame.getGameState();
-  console.log('Game statistics:', {
-    activePlayers: stats.playerCount,
-    totalPlayers: stats.totalPlayers,
-    totalSolInGame: stats.totalSolDisplay,
-    foodCount: stats.foodCount,
-    zones: stats.zoneStats,
-    serverWallet: serverWallet ? serverWallet.publicKey.toString() : 'not configured'
-  });
+  const stats = roomManager.getGlobalStats();
+  console.log('=== GAME STATISTICS ===');
+  console.log('Total rooms:', stats.totalRooms);
+  console.log('Total players:', stats.totalPlayers);
+  console.log('Active players:', stats.totalActivePlayers);
+  console.log('Total SOL in game:', stats.totalSolDisplay);
+  console.log('Average players per room:', stats.averagePlayersPerRoom);
+  console.log('Capacity used:', stats.capacityUsed + '%');
+  console.log('Server wallet:', serverWallet ? serverWallet.publicKey.toString() : 'not configured');
+  console.log('=======================');
 }, 60000);
 
 // Start server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Solana.io Global Game Server running on port ${PORT}`);
+  console.log(`Solana.io Multi-Room Game Server running on port ${PORT}`);
   console.log(`Connected to Solana ${SOLANA_NETWORK}`);
   console.log(`Program ID: ${PROGRAM_ID.toString()}`);
   console.log(`Server wallet: ${serverWallet ? serverWallet.publicKey.toString() : 'not configured'}`);
   console.log(`Blockchain updates: ${serverWallet ? 'ENABLED' : 'DISABLED'}`);
-  console.log('Global game is active with zone system!');
+  console.log(`Total capacity: ${roomManager.maxRooms} rooms x ${roomManager.maxPlayersPerRoom} players = ${roomManager.maxRooms * roomManager.maxPlayersPerRoom} players`);
+  console.log('Multi-room system is active!');
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully...');
+  roomManager.stopAll();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
 });

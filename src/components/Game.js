@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import Canvas from './Canvas';
 import { cashOut } from '../utils/SolanaTransactions';
+import { useOptimizedSocket } from '../hooks/useOptimizedSocket';
 import './Game.css';
 
 export default function Game({ initialStake, nickname, onLeaveGame, setPendingCashOut, socket }) {
@@ -19,6 +20,8 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
   const [connectionStatus, setConnectionStatus] = useState('Connecting...');
   const [deathReason, setDeathReason] = useState('');
   const [combatCooldown, setCombatCooldown] = useState(0);
+  const [roomId, setRoomId] = useState(null);
+  const [deltaUpdates, setDeltaUpdates] = useState(false); // Feature flag
   
   const canvasRef = useRef(null);
   const inputRef = useRef({
@@ -26,6 +29,13 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
     mouseY: 0,
     split: false,
     eject: false
+  });
+  
+  // Performance monitoring
+  const performanceRef = useRef({
+    lastUpdate: Date.now(),
+    updateCount: 0,
+    fps: 0
   });
   
   // Timer dla combat cooldown
@@ -60,11 +70,16 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
     document.body.style.height = '100vh';
     document.body.style.width = '100vw';
     
+    // Disable touch events that might cause scrolling
+    const preventDefaultTouch = (e) => e.preventDefault();
+    document.addEventListener('touchmove', preventDefaultTouch, { passive: false });
+    
     return () => {
       document.body.style.overflow = originalOverflow;
       document.body.style.position = originalPosition;
       document.body.style.height = originalHeight;
       document.body.style.width = '';
+      document.removeEventListener('touchmove', preventDefaultTouch);
     };
   }, []);
   
@@ -96,17 +111,22 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
       console.log('Received joined_game:', data);
       if (data.success) {
         setIsConnected(true);
-        setConnectionStatus('Connected to game');
+        setRoomId(data.roomId);
+        setConnectionStatus(`Connected to room ${data.roomId}`);
       }
     };
     
-    const handleGameState = (state) => {
-      console.log('Received game_state:', {
-        playerCount: state.playerCount,
-        foodCount: state.foodCount,
-        mapSize: state.mapSize
-      });
+    const handleRoomState = (state) => {
       setGameState(state);
+      
+      // Performance tracking
+      performanceRef.current.updateCount++;
+      const now = Date.now();
+      if (now - performanceRef.current.lastUpdate >= 1000) {
+        performanceRef.current.fps = performanceRef.current.updateCount;
+        performanceRef.current.updateCount = 0;
+        performanceRef.current.lastUpdate = now;
+      }
     };
     
     const handlePlayerView = (view) => {
@@ -115,18 +135,8 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
         return;
       }
       
-      console.log('Received player_view:', {
-        hasPlayer: !!view.player,
-        playerAlive: view.player?.isAlive,
-        playerPos: view.player ? `${Math.floor(view.player.x)}, ${Math.floor(view.player.y)}` : 'N/A',
-        playersCount: view.players?.length || 0,
-        foodCount: view.food?.length || 0,
-        canCashOut: view.player?.canCashOut,
-        combatCooldown: view.player?.combatCooldownRemaining
-      });
-      
       setPlayerView(view);
-      setConnectionStatus('In game');
+      setConnectionStatus(`Room ${view.gameState?.roomId || roomId} - Playing`);
       
       // Initialize mouse position to player position
       if (view.player && inputRef.current.mouseX === 0 && inputRef.current.mouseY === 0) {
@@ -135,13 +145,77 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
       }
     };
     
+    const handlePlayerDelta = (delta) => {
+      if (!delta || delta.type === 'full') {
+        setPlayerView(delta.data);
+        return;
+      }
+      
+      // Apply delta updates
+      setPlayerView(prevView => {
+        if (!prevView) return null;
+        
+        const newView = { ...prevView };
+        
+        // Update player
+        if (delta.player) {
+          newView.player = { ...prevView.player, ...delta.player };
+        }
+        
+        // Update entities
+        if (delta.entities) {
+          const entityMap = new Map(prevView.players.map(p => [p.id, p]));
+          
+          // Add new entities
+          delta.entities.added.forEach(entity => {
+            entityMap.set(entity.id, entity);
+          });
+          
+          // Update existing entities
+          delta.entities.updated.forEach(update => {
+            const entity = entityMap.get(update.id);
+            if (entity) {
+              entityMap.set(update.id, { ...entity, ...update });
+            }
+          });
+          
+          // Remove entities
+          delta.entities.removed.forEach(id => {
+            entityMap.delete(id);
+          });
+          
+          newView.players = Array.from(entityMap.values());
+        }
+        
+        // Update food
+        if (delta.food) {
+          const foodMap = new Map(prevView.food.map(f => [f.id, f]));
+          
+          delta.food.added.forEach(food => {
+            foodMap.set(food.id, food);
+          });
+          
+          delta.food.removed.forEach(id => {
+            foodMap.delete(id);
+          });
+          
+          newView.food = Array.from(foodMap.values());
+        }
+        
+        // Update other fields
+        if (delta.leaderboard) newView.leaderboard = delta.leaderboard;
+        if (delta.gameState) newView.gameState = { ...prevView.gameState, ...delta.gameState };
+        
+        return newView;
+      });
+    };
+    
     const handlePlayerEliminated = (data) => {
       console.log('Player eliminated:', data);
       if (data.playerAddress === publicKey.toString()) {
         setIsPlayerDead(true);
         setDeathReason(data.reason || 'You were eaten by another player!');
-        setPlayerView(null); // Clear player view since they're out of the game
-        // Clear saved game state
+        setPlayerView(null);
         localStorage.removeItem('dotara_io_game_state');
         localStorage.removeItem('dotara_io_pending_cashout');
       }
@@ -155,7 +229,6 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
     const handleError = (error) => {
       console.error('Game error:', error);
       setConnectionStatus(`Error: ${error.message || error}`);
-      // If error is about being dead, show death screen
       if (error.message && error.message.includes('eaten')) {
         setIsPlayerDead(true);
         setDeathReason(error.message);
@@ -165,8 +238,9 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
     
     // Register all event listeners
     socket.on('joined_game', handleJoinedGame);
-    socket.on('game_state', handleGameState);
+    socket.on('room_state', handleRoomState);
     socket.on('player_view', handlePlayerView);
+    socket.on('player_delta', handlePlayerDelta);
     socket.on('player_eliminated', handlePlayerEliminated);
     socket.on('cash_out_result', handleCashOutResult);
     socket.on('error', handleError);
@@ -175,27 +249,42 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
     return () => {
       console.log('Cleaning up game connection');
       socket.off('joined_game', handleJoinedGame);
-      socket.off('game_state', handleGameState);
+      socket.off('room_state', handleRoomState);
       socket.off('player_view', handlePlayerView);
+      socket.off('player_delta', handlePlayerDelta);
       socket.off('player_eliminated', handlePlayerEliminated);
       socket.off('cash_out_result', handleCashOutResult);
       socket.off('error', handleError);
     };
-  }, [socket, publicKey, nickname, initialStake, onLeaveGame]);
+  }, [socket, publicKey, nickname, initialStake, onLeaveGame, roomId]);
   
-  // Send player input
+  // Send player input - optimized
   useEffect(() => {
     if (!socket || !isConnected || !publicKey || isPlayerDead) return;
     
+    let lastSentInput = { mouseX: 0, mouseY: 0 };
+    const inputThreshold = 5; // Minimum movement before sending update
+    
     const sendInput = () => {
-      socket.emit('player_input', {
-        playerAddress: publicKey.toString(),
-        input: inputRef.current
-      });
+      // Only send if there's significant change
+      const dx = Math.abs(inputRef.current.mouseX - lastSentInput.mouseX);
+      const dy = Math.abs(inputRef.current.mouseY - lastSentInput.mouseY);
       
-      // Reset one-time actions
-      inputRef.current.split = false;
-      inputRef.current.eject = false;
+      if (dx > inputThreshold || dy > inputThreshold || 
+          inputRef.current.split || inputRef.current.eject) {
+        
+        socket.emit('player_input', {
+          playerAddress: publicKey.toString(),
+          input: { ...inputRef.current }
+        });
+        
+        lastSentInput.mouseX = inputRef.current.mouseX;
+        lastSentInput.mouseY = inputRef.current.mouseY;
+        
+        // Reset one-time actions
+        inputRef.current.split = false;
+        inputRef.current.eject = false;
+      }
     };
     
     const interval = setInterval(sendInput, 33); // 30 FPS
@@ -203,7 +292,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
     return () => clearInterval(interval);
   }, [socket, isConnected, publicKey, isPlayerDead]);
   
-  // Mouse handling
+  // Mouse handling - optimized
   const handleMouseMove = useCallback((e) => {
     if (!canvasRef.current || isPlayerDead) return;
     
@@ -234,6 +323,22 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
     }
   }, [playerView, isPlayerDead]);
   
+  // Touch handling for mobile
+  const handleTouchMove = useCallback((e) => {
+    if (!canvasRef.current || isPlayerDead || e.touches.length === 0) return;
+    
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvasRef.current.getBoundingClientRect();
+    
+    const fakeMouseEvent = {
+      clientX: touch.clientX,
+      clientY: touch.clientY
+    };
+    
+    handleMouseMove(fakeMouseEvent);
+  }, [handleMouseMove, isPlayerDead]);
+  
   // Keyboard handling
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -255,6 +360,33 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isPlayerDead]);
+  
+  // Touch events for mobile controls
+  useEffect(() => {
+    const handleTouchStart = (e) => {
+      if (isPlayerDead) return;
+      
+      // Double tap for split
+      const now = Date.now();
+      if (this.lastTap && now - this.lastTap < 300) {
+        e.preventDefault();
+        inputRef.current.split = true;
+      }
+      this.lastTap = now;
+    };
+    
+    if (canvasRef.current) {
+      canvasRef.current.addEventListener('touchstart', handleTouchStart);
+      canvasRef.current.addEventListener('touchmove', handleTouchMove);
+      
+      return () => {
+        if (canvasRef.current) {
+          canvasRef.current.removeEventListener('touchstart', handleTouchStart);
+          canvasRef.current.removeEventListener('touchmove', handleTouchMove);
+        }
+      };
+    }
+  }, [isPlayerDead, handleTouchMove]);
   
   // Handle cash out
   const handleCashOut = async () => {
@@ -379,6 +511,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
           <h2>{connectionStatus}</h2>
           <div className="spinner" style={{ margin: '20px auto' }}></div>
           <p>Waiting for game data...</p>
+          {roomId && <p>Room ID: {roomId}</p>}
         </div>
       </div>
     );
@@ -391,7 +524,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
         <div className="game-ui">
           {/* TOP RIGHT - Leaderboard */}
           <div className="leaderboard">
-            <h3>Leaderboard</h3>
+            <h3>Leaderboard (Room {roomId})</h3>
             {gameState?.leaderboard?.map((player, index) => (
               <div key={player.address} className="leaderboard-item">
                 <span className="rank">{player.rank}.</span>
@@ -412,6 +545,10 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
           {gameState && playerView?.player && (
             <div className="game-info">
               <div className="info-item">
+                <span>Room:</span>
+                <span className="value">{roomId}/20</span>
+              </div>
+              <div className="info-item">
                 <span>Your Mass:</span>
                 <span className="value">{Math.floor(playerView.player.mass)}</span>
               </div>
@@ -420,11 +557,11 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
                 <span className="value">{playerView.player.playersEaten || 0}</span>
               </div>
               <div className="info-item" style={{ marginTop: '10px', paddingTop: '10px', borderTop: '2px solid #ECF0F1' }}>
-                <span>Active Players:</span>
+                <span>Room Players:</span>
                 <span className="value">{gameState.playerCount}</span>
               </div>
               <div className="info-item">
-                <span>Total SOL:</span>
+                <span>Room SOL:</span>
                 <span className="value">{gameState.totalSolDisplay} SOL</span>
               </div>
               {playerView.player.canAdvanceToZone && (
@@ -433,6 +570,10 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
                   <span className="value">Zone {playerView.player.canAdvanceToZone}</span>
                 </div>
               )}
+              <div className="info-item" style={{ marginTop: '10px', fontSize: '12px', color: '#7F8C8D' }}>
+                <span>FPS:</span>
+                <span className="value">{performanceRef.current.fps}</span>
+              </div>
             </div>
           )}
           
@@ -447,6 +588,11 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
             <div className="control-item">
               <kbd>W</kbd> - Eject mass
             </div>
+            {window.matchMedia('(max-width: 768px)').matches && (
+              <div className="control-item" style={{ marginTop: '5px', fontSize: '12px', color: '#7F8C8D' }}>
+                <kbd>Double Tap</kbd> - Boost
+              </div>
+            )}
           </div>
           
           {/* BOTTOM CENTER - Action buttons */}
@@ -468,7 +614,7 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
         />
       )}
       
-      {/* Death screen - poprawione */}
+      {/* Death screen */}
       {isPlayerDead && (
         <div className="death-overlay">
           <div className="death-content">
@@ -481,10 +627,8 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
                 e.preventDefault();
                 e.stopPropagation();
                 console.log('Back to menu clicked');
-                // Wyczyść wszystko
                 localStorage.removeItem('dotara_io_game_state');
                 localStorage.removeItem('dotara_io_pending_cashout');
-                // Użyj onLeaveGame jeśli działa, lub force redirect
                 try {
                   onLeaveGame();
                 } catch (error) {
