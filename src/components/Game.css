@@ -732,33 +732,7 @@
   opacity: 0.7;
 }
 
-/* Combat warning */
-.combat-warning {
-  position: absolute;
-  bottom: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(231, 76, 60, 0.95);
-  color: white;
-  padding: 10px 20px;
-  border-radius: 15px;
-  font-weight: 700;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.1);
-  animation: pulse 1s ease-in-out infinite;
-}
 
-@keyframes pulse {
-  0%, 100% { transform: translateX(-50%) scale(1); }
-  50% { transform: translateX(-50%) scale(1.05); }
-}
-
-.combat-warning-icon {
-  font-size: 20px;
-}
 
 /* Spinner */
 .spinner {

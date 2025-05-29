@@ -449,14 +449,6 @@ export default function Game({ initialStake, nickname, onLeaveGame, setPendingCa
             </div>
           </div>
           
-          {/* Combat warning */}
-          {playerView?.player && !playerView.player.canCashOut && combatCooldown > 0 && (
-            <div className="combat-warning">
-              <span className="combat-warning-icon">⚔️</span>
-              <span>In combat! Cash out locked for {combatCooldown}s</span>
-            </div>
-          )}
-          
           {/* BOTTOM CENTER - Action buttons */}
           <div className="action-buttons">
             {renderCashOutButton()}

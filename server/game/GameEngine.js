@@ -488,36 +488,36 @@ class GameEngine {
         // Pomiń graczy w trakcie cash out
         if (player1.isCashingOut || player2.isCashingOut) continue;
         
-        // NOWE: Sprawdź czy gracze się dotykają (dla combat log)
+        // NAJPIERW sprawdź czy gracze się dotykają (dla combat log)
         if (this.physics.checkCircleCollision(player1, player2)) {
-          // Oznacz obydwu graczy jako w walce
+          // Oznacz OBYDWU graczy jako w walce - niezależnie od tego czy ktoś zostanie zjedzony
           player1.enterCombat();
           player2.enterCombat();
-        }
-        
-        // Sprawdź kolizję z 80% pokryciem (zjedzenie)
-        if (this.physics.checkCircleCollisionWithOverlap(player1, player2, 0.8)) {
-          // Większy gracz zjada mniejszego
-          if (player1.radius > player2.radius * 1.1) {
-            console.log(`Player ${player1.address} is eating player ${player2.address}`);
-            const eatenValue = player2.solValue;
-            player1.eatPlayer(player2);
-            playersToRemove.push(player2.address);
-            
-            // Wywołaj callback do aktualizacji blockchain
-            if (this.onPlayerEaten) {
-              this.onPlayerEaten(player1.address, player2.address, eatenValue);
-            }
-            
-          } else if (player2.radius > player1.radius * 1.1) {
-            console.log(`Player ${player2.address} is eating player ${player1.address}`);
-            const eatenValue = player1.solValue;
-            player2.eatPlayer(player1);
-            playersToRemove.push(player1.address);
-            
-            // Wywołaj callback do aktualizacji blockchain
-            if (this.onPlayerEaten) {
-              this.onPlayerEaten(player2.address, player1.address, eatenValue);
+          
+          // TERAZ sprawdź czy ktoś kogoś zjada (80% pokrycia)
+          if (this.physics.checkCircleCollisionWithOverlap(player1, player2, 0.8)) {
+            // Większy gracz zjada mniejszego
+            if (player1.radius > player2.radius * 1.1) {
+              console.log(`Player ${player1.address} is eating player ${player2.address}`);
+              const eatenValue = player2.solValue;
+              player1.eatPlayer(player2);
+              playersToRemove.push(player2.address);
+              
+              // Wywołaj callback do aktualizacji blockchain
+              if (this.onPlayerEaten) {
+                this.onPlayerEaten(player1.address, player2.address, eatenValue);
+              }
+              
+            } else if (player2.radius > player1.radius * 1.1) {
+              console.log(`Player ${player2.address} is eating player ${player1.address}`);
+              const eatenValue = player1.solValue;
+              player2.eatPlayer(player1);
+              playersToRemove.push(player1.address);
+              
+              // Wywołaj callback do aktualizacji blockchain
+              if (this.onPlayerEaten) {
+                this.onPlayerEaten(player2.address, player1.address, eatenValue);
+              }
             }
           }
         }
