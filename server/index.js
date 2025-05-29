@@ -43,7 +43,7 @@ const io = new Server(server, {
 // Konfiguracja Solana
 const SOLANA_NETWORK = process.env.SOLANA_NETWORK || 'devnet';
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || clusterApiUrl(SOLANA_NETWORK);
-const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || 'J4CuZ3NrqppFQ8gjrBgxMheNPui4RxF3S1CoeEeKWWqv');
+const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID || 'C4KnupLUR9fLC12sckRY1QsNfb2eWDrfWQmHydLyMN8y');
 
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
@@ -216,42 +216,6 @@ async function forceCleanupPlayer(playerAddress) {
     // Jeśli błąd to że gracz nie jest aktywny, to to jest ok
     if (error.logs && error.logs.some(log => log.includes('Player is not active'))) {
       console.log('Player already inactive, no need to cleanup');
-      return 'already_inactive';
-    }
-    
-    return null;
-  }
-}igner zamiast gracza
-    const instruction = new TransactionInstruction({
-      keys: [
-        { pubkey: playerPubkey, isSigner: false, isWritable: true }, // Gracz NIE jest signer
-        { pubkey: playerStatePDA, isSigner: false, isWritable: true },
-        { pubkey: gamePDA, isSigner: false, isWritable: true },
-        { pubkey: PLATFORM_FEE_WALLET, isSigner: false, isWritable: true },
-      ],
-      programId: PROGRAM_ID,
-      data: instructionData
-    });
-    
-    // Utwórz i wyślij transakcję
-    const transaction = new Transaction().add(instruction);
-    
-    const signature = await sendAndConfirmTransaction(
-      connection,
-      transaction,
-      [serverWallet], // Server wallet jako signer
-      { commitment: 'confirmed' }
-    );
-    
-    console.log('Player force cashed out. Signature:', signature);
-    return signature;
-    
-  } catch (error) {
-    console.error('Error force cashing out player:', error);
-    
-    // Jeśli błąd to że gracz nie jest aktywny, to to jest ok
-    if (error.logs && error.logs.some(log => log.includes('InvalidAccountData'))) {
-      console.log('Player already inactive, no need to cash out');
       return 'already_inactive';
     }
     
